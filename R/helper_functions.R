@@ -162,6 +162,7 @@ validate_gene_test<-function(opt){
 #' helper function to validate gene test from command line
 #' 
 #' @param opt commandline arguments from gene test
+#' @importFrom utils file_test
 #' @export
 validate_gene_test_pres_abs<-function(opt){
   

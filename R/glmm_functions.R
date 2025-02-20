@@ -355,6 +355,7 @@ fit_beta_one_gene <- function(glmm_fit, glm_fit0, grm, one_gene_df, SPA = FALSE)
 #' @param verbose whether outputting messages in the process of model fitting
 #' @param log_file log file to write to
 #' @return model output for the tau test on population structure 
+#' @importFrom logr log_open log_print log_close
 #' @export
 fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter = 100, verbose = TRUE, tol = .0001, log_file = NA) {
   # Fits the null generalized linear mixed model for a binary trait
@@ -633,6 +634,8 @@ run_tau_test <- function(glm.fit0, grm, n_tau, species_id = "s_id", tau0, phi0, 
 #' @param sample_by_gene_df sample-by-gene data frame with sample_name, and list_of_genes
 #' @param SPA whether to run Saddle point approximation for pvalues (will slow down output)
 #' @return dataframe of beta estimates for all genes tested
+#' @importFrom stats cor glm model.matrix pchisq pnorm qnorm sd var
+#' @importFrom dplyr arrange bind_rows all_of
 #' @export
 fit_beta <- function(pop.struct.glmm, glm.fit0, grm, sample_by_gene_df, SPA = FALSE) {
   # Args:
@@ -649,6 +652,7 @@ fit_beta <- function(pop.struct.glmm, glm.fit0, grm, sample_by_gene_df, SPA = FA
   list_of_samples_from_glmm = pop.struct.glmm$sample_names
   stopifnot(all.equal(rownames(grm), list_of_samples_from_glmm))
   
+  stopifnot(colnames(sample_by_gene_df)[1] == "sample_name")
   sample_by_gene_df <- sample_by_gene_df %>% as.data.frame() 
   rownames(sample_by_gene_df) <- sample_by_gene_df$sample_name
   
