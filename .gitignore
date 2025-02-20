@@ -5,3 +5,4 @@
 inst/doc
 renv.lock
 renv/
+.DS_Store
