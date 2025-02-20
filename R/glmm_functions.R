@@ -76,7 +76,7 @@ get_coef_inner <- function(Y, X, W, var_vec, grm) {
   return(coef_list)
 }
 
-get_alpha <- function(y, X, var_vec, grm, family, alpha0, eta0, offset, verbose = FALSE, maxiter, tol.coef = tol, write_log = FALSE) {
+get_alpha <- function(y, X, var_vec, grm, family, alpha0, eta0, offset, maxiter, tol.coef = tol) {
   # Adapted from Get_Coef from SAIGE package
   mu = family$linkinv(eta0)
   mu_eta = family$mu.eta(eta0)
@@ -90,16 +90,6 @@ get_alpha <- function(y, X, var_vec, grm, family, alpha0, eta0, offset, verbose 
 
     alpha = as.matrix(alpha.obj$alpha)
     eta = as.matrix(alpha.obj$eta + offset)
-
-    if (verbose) {
-      cat("\n Phi and Tau:\n")
-      cat(var_vec)
-      cat("\n Fixed-effect coefficients:\n")
-      cat(alpha)
-    }
-    if (write_log) {
-      put(paste(" Tau:", var_vec, " Fixed-effect coefficients:", alpha), console = FALSE)
-    }
 
     mu = family$linkinv(eta)
     mu_eta = family$mu.eta(eta)
@@ -430,7 +420,7 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
   log_print(paste("====get_alpha::initial var_vec:: ", paste(round(var_vec, 4), collapse = ", "), sep = ""), console = verbose)
 
   ## Fixed-effect coefficients => alpha.obj$alpha
-  alpha.obj = get_alpha(y, X, var_vec0, grm, family, alpha0, eta0, offset, maxiter = maxiter, verbose = verbose, tol.coef = tol, write_log = write_log)
+  alpha.obj = get_alpha(y, X, var_vec0, grm, family, alpha0, eta0, offset, maxiter = maxiter, tol.coef = tol)
  
   ### Initial Update of variance components phi and tau 
   if (quant) {
@@ -454,7 +444,7 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
     rss_0 = sum((y - mu)^2)
     
     ## get alpha
-    alpha.obj = get_alpha(y, X, var_vec, grm, family, alpha0, eta0, offset, verbose = verbose, maxiter = maxiter, tol.coef = tol, write_log = write_log)
+    alpha.obj = get_alpha(y, X, var_vec, grm, family, alpha0, eta0, offset, maxiter = maxiter, tol.coef = tol)
     ## fit tau and phi
     fit.obj = fit_vars(alpha.obj$Y, X, grm, alpha.obj$W, var_vec, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var, tol = tol, verbose = verbose, write_log = write_log, quant = quant)
     
@@ -501,7 +491,7 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
     log_print("Model not converged", console = verbose)
   }
   
-  alpha.obj = get_alpha(y, X, var_vec, grm, family, alpha, eta, offset, verbose = verbose, maxiter = maxiter, tol.coef = tol, write_log = write_log)
+  alpha.obj = get_alpha(y, X, var_vec, grm, family, alpha, eta, offset, maxiter = maxiter, tol.coef = tol)
   
   cov_var = alpha.obj$cov_var
   alpha = alpha.obj$alpha
