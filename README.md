@@ -15,7 +15,7 @@ Install package in R
 
 ```
 library(devtools)
-install_github('miriam-goldman/microSLAM')
+install_github('pollardlab/microSLAM')
 library(microSLAM)
 ```
 

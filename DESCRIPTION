@@ -1,10 +1,13 @@
 Package: microSLAM
 Type: Package
-Title: Microbiome Population Structure Leveraged Association Models
-Version: 0.0.1.0
-Authors@R: 
-  person( given ="Miriam",family ="Goldman",email ="miriamagoldman@gmail.com",role = c("aut","cre"))
-Description: This package runs Microbiome Population Structure Leveraged Association Models using the Generalized Linear Mixed Model Approach.
+Title: Population Structure Aware Microbiome Association Models
+Version: 1.0.0.9000
+Authors@R: c(
+	person(given ="Miriam",family ="Goldman",email ="miriamagoldman@gmail.com",role = c("aut", "cre")),
+	person(given ="Chunyu",family ="Zhao",role = c("aut")),
+	person(given ="Katie",family ="Pollard",role = c("aut", "ths"))
+)
+Description: This package runs population structure aware microbiome association models using generalized linear mixed model approach.
 License: use_mit_license()
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.1
