@@ -182,7 +182,7 @@ get_AI_score_quant <- function(Y, X, grm, W, var_vec, sigmai_Y, sigmai_X, cov_va
   return(list("YPAPY" = YPAPY, "PY" = PY1, "YPwPY" = YPwPY, "trace_P_grm" = trace_P_grm, "trace_PW" = trace_PW, "AI" = AI_mat, "score_vector" = score_vector))
 }
 
-fit_vars <- function(Y_vec, X_mat, grm, w_vec, var_vec, sigmai_Y, sigmai_X, cov_var, tol, quant = FALSE, verbose, write_log) {
+fit_vars <- function(Y_vec, X_mat, grm, w_vec, var_vec, sigmai_Y, sigmai_X, cov_var, tol, quant = FALSE) {
   # Fitting process for tau and phi
   # Adapted from fitglmmaiRPCG_q + fitglmmaiRPCG from SAIGE package
   if (!quant) {
@@ -254,7 +254,7 @@ simulate_tau_inner <- function(glm.fit0, grm, species_id = "s_id", tau0, phi0) {
     message("GLMM fitting failed or produced no results.")
   }
 
-  return(data.frame("tau" = tau, "t = t", "phi" = phi))
+  return(data.frame("tau" = tau, "t" = t, "phi" = phi))
 }
 
 
@@ -292,7 +292,7 @@ fit_beta_one_gene <- function(glmm_fit, glm_fit0, grm, one_gene_df, SPA = FALSE)
   # Adapted from SAIGE package
 
   check_grm(grm, glm_fit0, verbose = TRUE)
-  check_beta(glmm_fit, glm_fit0, grm, gene_df, SPA)
+  check_beta(glmm_fit, glm_fit0, grm, one_gene_df, SPA)
   
   forbeta.obj = glmm_fit$forbeta.obj
   family = glm_fit0$family
@@ -302,7 +302,7 @@ fit_beta_one_gene <- function(glmm_fit, glm_fit0, grm, one_gene_df, SPA = FALSE)
   sqrt_W = mu_eta / sqrt(glm_fit0$family$variance(mu))
   W1 = sqrt_W^2 
 
-  G0 = as.vector(one_gene$gene_value)
+  G0 = as.vector(one_gene_df[, 2])
   G_tilde = G0 - glmm_fit$forbeta.obj$XXVX_inv %*% (glmm_fit$forbeta.obj$XV %*% G0) # G1 is X adjusted
   Y = eta + (glmm_fit$y - mu) / mu_eta
   t_score = t(G_tilde) %*% (glmm_fit$y - mu)
@@ -381,7 +381,7 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
   log_print(paste("====Fixed-effect coefficients:"), console = verbose)
   log_print(glm.fit0, console = verbose)
   
-  check_inputs_tau(glm.fit0, grm, species_id, tau0, phi0, maxiter, tol, verbose, write_log, log_file)
+  check_inputs_tau(glm.fit0, grm, species_id, tau0, phi0, maxiter, tol, verbose, log_file)
 
   y = glm.fit0$y
   n = length(y)
@@ -446,7 +446,7 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
     ## get alpha
     alpha.obj = get_alpha(y, X, var_vec, grm, family, alpha0, eta0, offset, maxiter = maxiter, tol.coef = tol)
     ## fit tau and phi
-    fit.obj = fit_vars(alpha.obj$Y, X, grm, alpha.obj$W, var_vec, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var, tol = tol, verbose = verbose, write_log = write_log, quant = quant)
+    fit.obj = fit_vars(alpha.obj$Y, X, grm, alpha.obj$W, var_vec, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var, tol = tol, quant = quant)
     
     ## update all params
     var_vec = as.numeric(fit.obj$var_vec)
@@ -500,7 +500,7 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
   Y = alpha.obj$Y
   mu = alpha.obj$mu
 
-  fit.final = fit_vars(alpha.obj$Y, X, grm, alpha.obj$W, var_vec, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var, tol = tol, verbose = verbose, write_log = write_log, quant = quant)
+  fit.final = fit_vars(alpha.obj$Y, X, grm, alpha.obj$W, var_vec, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var, tol = tol, quant = quant)
   var_vec = as.numeric(fit.final$var_vec)
   names(var_vec) = c("phi", "tau")
 
@@ -630,7 +630,7 @@ run_tau_test <- function(glm.fit0, grm, n_tau, species_id = "s_id", tau0, phi0, 
 #' @param pop.struct.glmm output of fit_tau_test; GLMM of species with grm accounted for
 #' @param glm.fit0 glm model. Model output with no sample relatedness accounted for
 #' @param grm Genetic Relatedness Matrix (from calculate_grm or user) NxN matrix of sample relatedness
-#' @param sample_by_gene_df long data frame with, gene_id, sample_name, and gene_value
+#' @param sample_by_gene_df sample-by-gene data frame with sample_name, and list_of_genes
 #' @param SPA whether to run Saddle point approximation for pvalues (will slow down output)
 #' @return dataframe of beta estimates for all genes tested
 #' @export
@@ -646,9 +646,11 @@ fit_beta <- function(pop.struct.glmm, glm.fit0, grm, sample_by_gene_df, SPA = FA
   # list of values for each gene examined
   # Adapted from SAIGE package
   
-
-  list_of_samples_from_glmm = glmm_fit$sample_names
+  list_of_samples_from_glmm = pop.struct.glmm$sample_names
   stopifnot(all.equal(rownames(grm), list_of_samples_from_glmm))
+  
+  sample_by_gene_df <- sample_by_gene_df %>% as.data.frame() 
+  rownames(sample_by_gene_df) <- sample_by_gene_df$sample_name
   
   sample_by_gene_df <- sample_by_gene_df %>% 
     mutate(sample_name = factor(sample_name, levels = list_of_samples_from_glmm)) %>%
@@ -940,7 +942,7 @@ check_gene_matrix <- function(gene_matrix) {
   }
 }
 
-check_inputs_tau <- function(glm.fit0,grm,species_id,tau0,phi0,maxiter,tol,verbose,write_log,log_file) {
+check_inputs_tau <- function(glm.fit0,grm,species_id,tau0,phi0,maxiter,tol,verbose,log_file) {
   ## check inputs are as expected for tau test
   # glm.fit0 baseline glm from glm function
   # grm output from create_grm or NxN matrix
@@ -955,12 +957,12 @@ check_inputs_tau <- function(glm.fit0,grm,species_id,tau0,phi0,maxiter,tol,verbo
   if(!is.logical(verbose)){
     stop("verbose should be a logical")
   }
-  if(write_log){
-    if(!file_test("-x",log_file)){
-      warning("log file is not writing to a file, check path, running without log file")
-      write_log = FALSE
-    }
+  
+  if(!dir.exists(dirname(log_file))){
+    warning("log file directory don't exist. Create one")
+    dir.create(dirname(log_file), recursive = T, showWarnings = F)
   }
+
   if(!is.numeric(tol)){
     stop("tolarance should be numeric")
   }
@@ -986,7 +988,6 @@ check_inputs_tau <- function(glm.fit0,grm,species_id,tau0,phi0,maxiter,tol,verbo
     stop("tau0 and phi0 must be a postive number")
   }
   check_grm(grm,glm.fit0,verbose)
-  
 }
 
 check_beta <- function(pop.struct.glmm, glm.fit0, grm, gene_df, SPA = FALSE) {
@@ -998,8 +999,8 @@ check_beta <- function(pop.struct.glmm, glm.fit0, grm, gene_df, SPA = FALSE) {
   if(!is.logical(SPA)){
     stop("SPA should be a logical")
   }
-  if(!(class(pop.struct.glmm)=="pop.struct.glmm")){
-    stop("pop.struct.glmm should be an output of fit_tau_test")
+  if (!inherits(pop.struct.glmm, "pop.struct.glmm")) {
+    stop("Error: pop.struct.glmm is not a valid object")
   }
   if(all(pop.struct.glmm$y != glm.fit0$y)){
     warning("y for pop.struct.glmm does not match y for glm.fit0, if this is not intentional double check data.")
@@ -1007,23 +1008,9 @@ check_beta <- function(pop.struct.glmm, glm.fit0, grm, gene_df, SPA = FALSE) {
   if(!is.data.frame(gene_df)){
     stop("gene_df is expected to be a data frame")
   }
-  if(!any("gene_id" == colnames(gene_df))){
-    stop("Expected column named gene_id, please use a gene_df with a column named gene_id")
-  }
   
   if(!any("sample_name" == colnames(gene_df))){
     stop("Expected column named sample_name, please use a gene_df with a column named sample_name with sample names")
-  }
-  if(!any("gene_value" == colnames(gene_df))){
-    stop("Expected column named gene_value, please use a gene_df with a column named gene_value with gene value")
-  }
-  sample_genes = unique(gene_df$gene_id)
-  one_gene =  gene_df[which(gene_df$gene_id == sample_genes[1]),]
-  if(!all(one_gene$sample_name == pop.struct.glmm$sample_names)){
-    warning("sample names for gene_df do not match sample names for  pop.struct.glmm, if this is not intentional double check data for order of samples and number of samples.")
-  }
-  if(ncol(gene_df)>3){
-    warning("expected stacked data frame of 3 columns, gene_id, sample_name, gene_value, data frame has more than 3 columns, check that data frame is stacked.")
   }
 }
 
@@ -1050,15 +1037,8 @@ check_grm <- function(grm, glm.fit0, verbose) {
     stop("number of samples from baseline glm does not match number of samples from grm, these must match")
   }
   if ("sample_name" %in% colnames(glm.fit0$data)) {
-    if (verbose) {
-      cat("\nchecking sample names of grm and glm fit match\n")
-    }
     if (!all(glm.fit0$data$sample_name == rownames(grm))) {
       stop("\nERROR! the sample names for glm and grm do not match")
-    } else {
-      if (verbose) {
-        cat("check complete")
-      }
     }
   } else {
     warning("not running check on sample names ensure grm sample order and glm fit sample order match! Will only check if data from glm has column named sample_name")

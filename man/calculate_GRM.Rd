@@ -4,14 +4,14 @@
 \alias{calculate_grm}
 \title{calculate_grm}
 \usage{
-calculate_grm(gene_matrix)
+calculate_grm(sample_by_gene_matrix)
 }
 \arguments{
-\item{gene_matrix}{must have first column as sample names and other columns as gene names}
+\item{sample_by_gene_matrix}{must have first column as sample names and other columns as gene names}
 }
 \value{
 grm genetic relatedness matrix for tau and beta test
 }
 \description{
-calculate the genetic relatedness matrix from the gene matrix
+This function alculates genetic relatedness matrix (GRM) from sample-by-gene matrix
 }
