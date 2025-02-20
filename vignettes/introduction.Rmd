@@ -11,22 +11,19 @@ vignette: >
 knitr::opts_chunk$set(
   collapse = TRUE,
   comment = "#>",
-  color_pal<<-c("#E69F00",
-              "#CC79A7","#56B4E9","#009E73",
-              "#F0E442","#0072B2","#D55E00",
-              "#E1BE6A","#0231A9"),
+  color_pal<<-c("#E69F00","#CC79A7","#56B4E9","#009E73","#F0E442","#0072B2","#D55E00","#E1BE6A","#0231A9"),
   myColor <- colorRampPalette(c("#FFFFFF",color_pal[4]))(50),
 library(data.table),
 library(pheatmap),
 library(tidyverse),
 library(magrittr),
- library(Matrix),
+library(Matrix),
 library(pROC),
 library(knitr),
-library(DT)
+library(DT),
+library(logr)
 )
 ```
-
 
 
 ```{r setup}
@@ -34,18 +31,18 @@ library(microSLAM)
 
 ### read in example metadata
 data("exp_metadata")
-
 ### read in example gene data
 data("exp_genedata")
+
 ### look at the data
 datatable(head(exp_genedata[1:10,1:10]))
 datatable(head(exp_metadata))
 ```
 
 ## Step 1: Compute genetic relatedness matrix (GRM)
+
 ### calculate the GRM (1-Manhattan distance between pairs of samples) using the gene data (samples by genes matrix)
 ```{r}
-
 GRM =calculate_grm(exp_genedata)
 datatable(round(head(GRM[1:10,1:10]),2))
 ```
@@ -60,6 +57,7 @@ pheatmap(GRM,show_rownames=FALSE,show_colnames=FALSE,treeheight_row=0,treeheight
 ```
 
 ## Step 2: Fit generalized linear model (glm) to estimate random effects and test for strain-trait associations using the additive genetic variance parameter tau
+
 ### fit baseline glm with only covariates and intercept for starting parameters 
 ```{r}
 glm_fit0=glm("y ~ age  + 1", data = exp_metadata, family = "binomial")
@@ -69,6 +67,7 @@ glm_fit0=glm("y ~ age  + 1", data = exp_metadata, family = "binomial")
 ```{r}
 glmm_fit=fit_tau_test(glm_fit0, GRM, species_id="test", verbose = TRUE, log_file=NA)
 ```
+
 ```{r}
 summary.pop.struct.glmm(glmm_fit)
 ```
@@ -88,17 +87,16 @@ pvalue=(sum(tautestfit$t >= glmm_fit$t) + 1)/n_tau
 print(paste("tau value:",round(glmm_fit$tau,2)))
 print(paste("t value:",round(glmm_fit$t,3),"pvalue:",round(pvalue,3)))
 ```
+
 ```{r permutations, echo=FALSE, fig.height=6, fig.width=8}
 ggplot(tautestfit,aes(t))+geom_histogram(bins = 30)+geom_vline(xintercept = glmm_fit$t,color ="red")+theme_minimal(base_size = 16)
-
 ```
-
 
 ## Step 3: Fit generalized linear mixed model for each gene and test if it associated with trait (beta test)
 ### transform the gene data to a long matrix to fit each gene separately
 ### If memory is a problem the gene data can be overwritten and transformed back if needed later. 
 
-```{r}
+```{r, eval=FALSE}
 gene_long=exp_genedata %>%
   pivot_longer(cols=starts_with("gene"),
                names_to ="gene_id",
@@ -108,7 +106,7 @@ gene_long=exp_genedata %>%
 
 ### fit a beta for each gene adjusting for the population structure 
 ```{r}
-gene_test_df=fit_beta(glmm_fit,glm_fit0,GRM,gene_long,SPA=TRUE)
+gene_test_df=fit_beta(glmm_fit, glm_fit0, GRM, exp_genedata, SPA=TRUE)
 ```
 
 ### plot a volcano plot of the results
@@ -117,10 +115,9 @@ ggplot(gene_test_df,aes(beta,-log10(SPA_pvalue)))+geom_point(data=gene_test_df[w
 ```
 
 ```{r}
-gene_test_df_vis<-gene_test_df
-gene_test_df_vis[,c(2,4:15)]<-round(gene_test_df[,c(2,4:15)],2)
+gene_test_df_vis <- gene_test_df %>% mutate(across(where(is.numeric), ~ round(.x, 2)))
 datatable(head(gene_test_df_vis[1:6,1:8]))
-datatable(head(gene_test_df_vis[1:6,9:15]))
+datatable(head(gene_test_df_vis[1:6,9:14]))
 ```
 
 ```{r}
