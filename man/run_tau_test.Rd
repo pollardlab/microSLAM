@@ -4,7 +4,7 @@
 \alias{run_tau_test}
 \title{run_tau_test}
 \usage{
-run_tau_test(glm.fit0, grm, n_tau, species_id = "s_id", tau0, phi0, seed = 1)
+run_tau_test(glm.fit0, grm, n_tau, species_id, tau0, phi0, seed = 100)
 }
 \arguments{
 \item{glm.fit0}{glm model. Model output with no sample relatedness accounted for}
@@ -18,9 +18,11 @@ run_tau_test(glm.fit0, grm, n_tau, species_id = "s_id", tau0, phi0, seed = 1)
 \item{tau0}{starting tau}
 
 \item{phi0}{starting phi}
+
+\item{seed}{random seed}
 }
 \value{
-df of values of T for tau for different permutations of the covarites matrix
+data frame of values of T for tau for different permutations of the covarites matrix
 }
 \description{
 take output from population structure test and test how significant the tau is for that set of data

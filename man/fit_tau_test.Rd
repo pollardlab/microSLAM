@@ -31,6 +31,8 @@ fit_tau_test(
 
 \item{verbose}{whether outputting messages in the process of model fitting}
 
+\item{tol}{tolence for variance estimation}
+
 \item{log_file}{log file to write to}
 }
 \value{

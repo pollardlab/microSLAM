@@ -3,8 +3,10 @@ title: "Quick start guide"
 output: rmarkdown::html_vignette
 vignette: >
   %\VignetteIndexEntry{introduction}
-  %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r, include = FALSE}
@@ -53,7 +55,8 @@ datatable(round(head(GRM[1:10,1:10]),2))
 library(pheatmap)
 myColor <- colorRampPalette(c("#FFFFFF","#009E73"))(50)
 pheatmap(GRM,show_rownames=FALSE,show_colnames=FALSE,treeheight_row=0,treeheight_col = 0,labels_row="samples",labels_col="samples",
-                    main=paste("GRM"),border_color=NA,annotation_row = exp_metadata[,-5],color=myColor,clustering_distance_rows=as.dist(1-GRM),clustering_distance_col=as.dist(1-GRM),clustering_method="average")
+                    main=paste("GRM"),border_color=NA,
+         annotation_row = exp_metadata[,2:5],color=myColor,clustering_distance_rows=as.dist(1-GRM),clustering_distance_col=as.dist(1-GRM),clustering_method="average")
 ```
 
 ## Step 2: Fit generalized linear model (glm) to estimate random effects and test for strain-trait associations using the additive genetic variance parameter tau
@@ -124,5 +127,5 @@ datatable(head(gene_test_df_vis[1:6,9:14]))
 straingenes = gene_test_df %>% filter(abs(cor_to_b)>.4)
 rownames(exp_genedata) = exp_genedata$sample_name
 straingenesvalues = exp_genedata[,straingenes$gene_id]
-pheatmap(straingenesvalues, show_rownames=FALSE, show_colnames=FALSE, treeheight_row=0, treeheight_col = 0, labels_row="samples", labels_col="samples", main=paste("Strain Associated Genes"), border_color=NA, annotation_row = exp_metadata[,-5], color=myColor, clustering_method="average")
+pheatmap(straingenesvalues, show_rownames=FALSE, show_colnames=FALSE, treeheight_row=0, treeheight_col = 0, labels_row="samples", labels_col="samples", main=paste("Strain Associated Genes"), border_color=NA, annotation_row = exp_metadata[,2:5], color=myColor, clustering_method="average")
 ```
