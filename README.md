@@ -48,7 +48,7 @@ The example dataset provided in the example_data is a simulated metadata matrix 
 <img src="https://github.com/miriam-goldman/microSLAM/blob/main/other/metadata.png" width=400>
 
 
-Users will import gene data and metadata from separate CSV files, as demonstrated below.
+Users can gene data and metadata from separate CSV files, as demonstrated below.
 
 ```
 library(tidyverse)
@@ -63,7 +63,6 @@ Using the imported sample-by-gene matrix, the first step is to compute the genet
 This GRM captures the population structure of the species across samples and 
 is calculated as the pairwise similarity score, defined as 1 minus the Manhattan distance between gene presence/absence vectors. 
 microSLAM utilized the GRM to estimate sample-specific random effects within the mixed effects model. 
-To ensure proper execution, the gene matrix must include a sample_name column.
 Alternatively, users can provide their own GRM, e.g. using a different distance metric.
 
 ```
@@ -104,7 +103,7 @@ pheatmap(GRM,show_rownames=FALSE,show_colnames=FALSE,
 
 ### Step 2: $\tau$ test for strain-trait association
 
-Fit a baseline generalized linear model (GLM) that includes only the covariate and an intercept to establish 
+Fit a baseline generalized linear model (GLM) that includes only the covariates and an intercept to establish 
 initial parameter estimates for the tau test. Since `y` is binary, the GLM uses a binomial family.
 
 ```
@@ -113,7 +112,7 @@ glm_fit0 = glm("y ~ age + 1", data = exp_metadata, family = "binomial")
 
 Fit a random-effects generalized linear model (GLM) using the baseline GLM and the Genetic Relatedness Matrix (GRM) to estimate the parameter $\tau$, 
 which quantifies the association between population structure and the trait (`y`).
-To ensure proper alignment, verify that the sample order in the GRM matches that in the GLM model before procedding.
+Make sure that the sample order in the GRM matches that in the GLM model before proceeding.
 
 ```
 glmm_fit=fit_tau_test(glm_fit0, GRM, species_id="species_test", verbose = FALSE, log_file="./microSLAM.log")
@@ -173,8 +172,8 @@ ggplot(tautestfit,aes(t))+
 After detecting population structure associated with the trait (`y`), 
 the next step is to fit a series of mixed effects models to evaluate independent associations
 between each gene and `y`,
-while adjusting for population structure using the random effects estimated in Step 2.
-A t-testis then performed to assess the significance of each gene's association with y ($\beta$).
+while adjusting for population structure using the random effects estimated in step two.
+A t-test was then performed to assess the significance of each gene's association with y ($\beta$).
 
 Genes that are rapidly gained or lost may exhibit such independent associations.
 
@@ -183,7 +182,7 @@ gene_test_df = fit_beta(glmm_fit, glm_fit0, GRM, exp_genedata, SPA=TRUE)
 ```
 
 Generate a volcano plot displaying each gene’s $\beta$ value against its p-value. 
-In this simulated dataset, genes 1, 2, and 3 were designed to exhibit associations that surpass the strain association. 
+In this simulated dataset, gene1, gene2, and gene3 were designed to exhibit associations that surpass the strain association. 
 Genes with p-values ≤ 0.005 are highlighted in red, corresponding to these three significant genes.
 
 ```
@@ -263,4 +262,3 @@ run_microslam(exp_genedata, exp_metadata, data.frame(gene_id = colnames(exp_gene
               formula_string = "y ~ age + 1", response_var = "y", 
               family = "binomial", n_tau = 100, verbose = TRUE)
 ```
-
