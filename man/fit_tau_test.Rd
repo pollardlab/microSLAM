@@ -13,7 +13,8 @@ fit_tau_test(
   maxiter = 100,
   verbose = TRUE,
   tol = 1e-04,
-  log_file = NA
+  log_file = NA,
+  debug = FALSE
 )
 }
 \arguments{
@@ -34,6 +35,8 @@ fit_tau_test(
 \item{tol}{tolence for variance estimation}
 
 \item{log_file}{log file to write to}
+
+\item{debug}{print more details if debug. (Developer only)}
 }
 \value{
 model output for the tau test on population structure

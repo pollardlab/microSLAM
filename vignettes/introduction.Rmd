@@ -1,5 +1,5 @@
 ---
-title: "Quick start guide"
+title: "microSLAM Quick Start Guide"
 output: rmarkdown::html_vignette
 vignette: >
   %\VignetteIndexEntry{introduction}
@@ -27,6 +27,7 @@ library(logr)
 )
 ```
 
+## Load Data
 
 ```{r setup}
 library(microSLAM)
@@ -44,8 +45,9 @@ datatable(head(exp_metadata))
 ## Step 1: Compute genetic relatedness matrix (GRM)
 
 ### calculate the GRM (1-Manhattan distance between pairs of samples) using the gene data (samples by genes matrix)
+
 ```{r}
-GRM =calculate_grm(exp_genedata)
+GRM = calculate_grm(exp_genedata)
 datatable(round(head(GRM[1:10,1:10]),2))
 ```
 
@@ -62,13 +64,14 @@ pheatmap(GRM,show_rownames=FALSE,show_colnames=FALSE,treeheight_row=0,treeheight
 ## Step 2: Fit generalized linear model (glm) to estimate random effects and test for strain-trait associations using the additive genetic variance parameter tau
 
 ### fit baseline glm with only covariates and intercept for starting parameters 
+
 ```{r}
 glm_fit0=glm("y ~ age  + 1", data = exp_metadata, family = "binomial")
 ```
 
 ### using baseline glm and GRM, fit a glm to estimate tau and random effects. The order of samples in the baseline glm and the GRM must match, if there is a column name sample_name in gene data to make GRM and in metadata used in glm this will be checked. 
 ```{r}
-glmm_fit=fit_tau_test(glm_fit0, GRM, species_id="test", verbose = TRUE, log_file=NA)
+glmm_fit=fit_tau_test(glm_fit0, GRM, species_id="species_test", verbose = TRUE, log_file="./microSLAM.log")
 ```
 
 ```{r}
@@ -77,7 +80,7 @@ summary.pop.struct.glmm(glmm_fit)
 
 ### test the significance of the tau that was fit
 ```{r}
-n_tau=100 ## number of permutations for tau test
+n_tau=100
 tautestfit=run_tau_test(glm_fit0, GRM, n_tau, species_id = "test", tau0=1, phi0=1, seed=63)
 ```
 
@@ -95,17 +98,7 @@ print(paste("t value:",round(glmm_fit$t,3),"pvalue:",round(pvalue,3)))
 ggplot(tautestfit,aes(t))+geom_histogram(bins = 30)+geom_vline(xintercept = glmm_fit$t,color ="red")+theme_minimal(base_size = 16)
 ```
 
-## Step 3: Fit generalized linear mixed model for each gene and test if it associated with trait (beta test)
-### transform the gene data to a long matrix to fit each gene separately
-### If memory is a problem the gene data can be overwritten and transformed back if needed later. 
-
-```{r, eval=FALSE}
-gene_long=exp_genedata %>%
-  pivot_longer(cols=starts_with("gene"),
-               names_to ="gene_id",
-               values_to = "gene_value") %>% 
-  as.data.frame()
-```
+## Step 3: Fit generalized linear mixed model for each gene and test if it is associated with trait (beta test)
 
 ### fit a beta for each gene adjusting for the population structure 
 ```{r}
@@ -129,3 +122,11 @@ rownames(exp_genedata) = exp_genedata$sample_name
 straingenesvalues = exp_genedata[,straingenes$gene_id]
 pheatmap(straingenesvalues, show_rownames=FALSE, show_colnames=FALSE, treeheight_row=0, treeheight_col = 0, labels_row="samples", labels_col="samples", main=paste("Strain Associated Genes"), border_color=NA, annotation_row = exp_metadata[,2:5], color=myColor, clustering_method="average")
 ```
+
+# run_microSLAM in one step
+
+```{r}
+run_microslam(exp_genedata, exp_metadata, data.frame(gene_id = colnames(exp_genedata)[-1]), GRM, "species_test", "./example_output", "./example_log", do_SPA = TRUE, 
+              formula_string = "y ~ age + 1", response_var = "y", family = "binomial", n_tau = 100, verbose = TRUE)
+```
+

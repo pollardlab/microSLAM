@@ -2,15 +2,26 @@
 
 ## Introduction
 
-MicroSLAM is an R package to perform population structure leveraged association modeling for the microbiome from metagenomics data. Microbiome association studies typically link host disease or other traits to summary statistics measured in metagenomics data, such as diversity or taxonomic composition. But identifying disease-associated species based on their relative abundance does not provide insight into why these microbes act as disease markers, and it overlooks cases where disease risk is related to specific strains with unique biological functions. microSLAM is an implementation of a  mixed-effects model that performs association tests that connect host traits to the presence/absence of genes within each microbiome species, while accounting for strain genetic relatedness across hosts. Traits can be quantitative or binary (such as case/control).
+microSLAM is an R package to perform population structure leveraged association modeling for the microbiome from metagenomics data. 
+Microbiome association studies typically link host disease or other traits to summary statistics measured in metagenomics data, 
+such as diversity or taxonomic composition. 
+But identifying disease-associated species based on their relative abundance does not provide insight into why these microbes act as disease markers, 
+and it overlooks cases where disease risk is related to specific strains with unique biological functions. 
+microSLAM is an implementation of a  mixed-effects model that performs association tests that connect host traits to the 
+presence/absence of genes within each species, while accounting for strain genetic relatedness across hosts. 
+Traits can be quantitative or binary (such as case/control).
 
-MicroSLAM is fit in three steps for each species. The first step estimates a genetic relatedness matrix (GRM) that measures population structure of the microbial species across hosts. Step two calculates the association between population structure and the trait (y), enabling detection of species for which a subset of related strains confer risk. To identify specific genes (G) whose presence/absence across diverse strains is associated with the trait after adjusting for population structure, step three models the trait as a function of gene occurrence plus random effects (b) estimated from step two. Steps two and three can include adjustment for covariates measured on each host.
+microSLAM is fit in three steps for each species. 
+The first step estimates a genetic relatedness matrix (GRM) that measures population structure of the microbial species across hosts. 
+Step two calculates the association between population structure and the trait (y), enabling detection of species for which a subset of related strains confer risk. To identify specific genes (G) whose presence/absence across diverse strains is associated with the trait after adjusting for population structure, step three models the trait as a function of gene occurrence plus random effects (b) estimated from step two. Steps two and three can include adjustment for covariates measured on each host.
 
 <p align="center">
 <img src="https://github.com/miriam-goldman/microSLAM/blob/main/other/Newflowchart.png" width=600>
 </p>
 
+
 ### Below is a guide showing all operative functionality in R.
+
 Install package in R
 
 ```
@@ -19,39 +30,58 @@ install_github('pollardlab/microSLAM')
 library(microSLAM)
 ```
 
-### Inputs:
+### Input:
 
-Inputs are usually two dataframes:
+Inputs are usually two data frames per species:
 
-1) Gene data: a matrix containing information about the genes from a species' pangenome that are present versus absent in each sample (host), typically filtered to remove core genes (e.g., omiting genes that are more than 90% present across samples). Gene presence/absence can be estimated with bioinformatics tools, such as MIDAS. This will be a samples by genes matrix and must contain the column sample_name to indicate the sample name. The matrix provided in example_data is a simulated gene presence/absence matrix (.csv format) for 100 samples and 1000 genes.
+1) Sample-by-Gene Binary Data: a binary matrix representing the presence or absence of genes from a species' pangenome across multiple samples.
+This matrix is typically filtered to remove core genes, such as those present in more than 90% of samples. 
+Gene presence/absence can be assessed using metagenotyping tools like [MIDAS](https://github.com/czbiohub-sf/MIDAS). 
+The data must follow a samples-by-genes format and must include a `sample_name` as the first column to represent sample identifiers.
+The example dataset provided in example_data is a simulated gene presence/absence matrix in CSV format, containing 100 samples and 1,000 genes.
 <img src="https://github.com/miriam-goldman/microSLAM/blob/main/other/genes.png" width=400>
 
-2) Metadata: a matrix containing information about the phenotype (y) and the covariates for each sample. The sample names should match those in the gene data, and hence the metadata matrix may need to be pre-filtered on a species by species basis to contain data for only those samples with gene data for that species. The matrix provided in example_data (.csv format) is simulated metadata.
+2) Sample Metadata: a matrix containing phenotype data (`y`) and other covariates for each sample.
+The sample names must match those in the gene data, ensuring consistency between datasets.
+Since the list of samples may vary across species, the metadata must be filtered on a species-by-species basis to ensure it includes only samples that have corresponding gene data.
+The example dataset provided in the example_data is a simulated metadata matrix in CSV format.
 <img src="https://github.com/miriam-goldman/microSLAM/blob/main/other/metadata.png" width=400>
 
-Users will read in gene data from a file and metadata from a second file, both in .csv format, as shown below. The simulated example_data were modeled to have a strain that is correlated with the phenotype y, and a strain that is uncorrelated as well as three genes that are more associated with y than expected given the population structure. Age was randomly simulated as a covariate that is not associated with y.  
+
+Users will import gene data and metadata from separate CSV files, as demonstrated below.
 
 ```
 library(tidyverse)
 library(magrittr)
-data("exp_genedata") ### read in example gene data
-## gene data is a number of samples by number of genes matrix for one species
-data("exp_metadata") ### read in example metadata
-## metadata is a number of samples (same as gene data) by k (number of covariates + 1) matrix
+data("exp_genedata")
+data("exp_metadata")
 ```
 
 ### Step 1: Calculate Genetic Relatedness Matrix (GRM)
 
-Using the gene matrix imported above, step one will compute the GRM using the gene data. This GRM represents the population structure of the species across samples and is estimated as the similarity (1 minus Manhattan distance) of gene presence/absence vectors between pairs of samples. MicroSLAM will use the GRM to estimate sample-specific random effects for the mixed effects model. The gene matrix must contain the column sample_name for this step to run properly. Note that users may provide their own GRM in the following steps of microSLAM. For example, the GRM could be computed using a different distance or it could be estimated using other forms of genetic variation, such as core genome single-nucleotide variants.
+Using the imported sample-by-gene matrix, the first step is to compute the genetic relatedness matrix (GRM) based on the gene presence/absence data.
+This GRM captures the population structure of the species across samples and 
+is calculated as the pairwise similarity score, defined as 1 minus the Manhattan distance between gene presence/absence vectors. 
+microSLAM utilized the GRM to estimate sample-specific random effects within the mixed effects model. 
+To ensure proper execution, the gene matrix must include a sample_name column.
+Alternatively, users can provide their own GRM, e.g. using a different distance metric.
+
 ```
 GRM = calculate_grm(exp_genedata)
 ```
+
 Example of GRM:
 
 <img src="https://github.com/miriam-goldman/microSLAM/blob/main/other/GRM.png" width=500>
 
 #### Visualization of the GRM with the strain information used to generate it labeled
-This gene data was generated with a strain (defined by a subset of correlated genes) that is associated with y in half of the samples and another strain that is not associated with y. In addition, three genes were simulated to be more related to y than is either strain.
+
+The simulated example_data were designed to include:
+
+- A strain that is correlated with the phenotype `y`
+- A strain that is uncorrelated with `y`
+- Three genes exhibiting a stronger association with `y` than expected give population structure.
+- Age, a randomly simulated as a covariate that is not associated with `y`.  
 
 <img src="https://github.com/miriam-goldman/microSLAM/blob/main/other/exampleGRM.png" width=600>
 
@@ -65,24 +95,28 @@ pheatmap(GRM,show_rownames=FALSE,show_colnames=FALSE,
     labels_row="samples",labels_col="samples",
     main=paste("GRM"),
     border_color=NA,
-    annotation_row = exp_metadata[,-5],
+    annotation_row = exp_metadata[,2:5],
     color=myColor,
     clustering_distance_rows=as.dist(1-GRM),
     clustering_distance_col=as.dist(1-GRM),
     clustering_method="average")
 ```
 
-### Step 2: Perform $\tau$ test for population structure (strain-trait associations)
-Fit a baseline generalized linear model (glm) with only the covariate and an intercept, to obtain starting parameter estimates for the tau test. The family for the glm is binomial because y is binary.
+### Step 2: $\tau$ test for strain-trait association
+
+Fit a baseline generalized linear model (GLM) that includes only the covariate and an intercept to establish 
+initial parameter estimates for the tau test. Since `y` is binary, the GLM uses a binomial family.
 
 ```
 glm_fit0 = glm("y ~ age + 1", data = exp_metadata, family = "binomial")
 ```
 
-Fit a random effects glm using the baseline glm and GRM, and use it to estimate the parameter $\tau$, which measures how associated population structure is with the trait y. As long as there is a column sample_name in the metadata and the gene data, the program will check that the order is the same for GRM and the glm model, if not the user should know to check that the order of samples in the glm and the GRM should be the same.
+Fit a random-effects generalized linear model (GLM) using the baseline GLM and the Genetic Relatedness Matrix (GRM) to estimate the parameter $\tau$, 
+which quantifies the association between population structure and the trait (`y`).
+To ensure proper alignment, verify that the sample order in the GRM matches that in the GLM model before procedding.
 
 ```
-glmm_fit = fit_tau_test(glm_fit0, GRM, species_id = "test", verbose = FALSE, log_file = NA)
+glmm_fit=fit_tau_test(glm_fit0, GRM, species_id="species_test", verbose = FALSE, log_file="./microSLAM.log")
 summary.pop.struct.glmm(glmm_fit)
 ```
 
@@ -92,22 +126,23 @@ Formula:  y~age+1+b
 family:  binomial logit
 Fixed-effect covariates estimates:
  (Intercept) age
- -0.287 0.005
+ -0.306 0.005
 Converged:  TRUE
 Number of iterations: 5
-Tau:  2.354
+Tau:  2.525
 Phi:  1 if logit or binomial should be 1
-T value of tau: 0.624
+T value of tau: 0.667
 Number of Samples: 100
 ```
 
-This output can be interpreted as showing that microSLAM's glm in step two was able to converge, the $\tau$ variable is 2.354, the random effects variables (b) have been estimated, and the coefficients for the covariates have been estimated.
+This output indicates that microSLAM's GLM in step two successfully converged, with the $\tau$ parameter estimated at 2.525. 
+Additionally, the random effects variables (`b`) have been computed, and the coefficients for the covariates have been estimated.
 
 Next, test the significance of the estimated $\tau$ with a permutation test.
 
 ```
-n_tau = 100 ### number of permutations for tau test
-tautestfit = run_tau_test(glm_fit0, GRM, n_tau, species_id = "test", tau0=1, phi0=1)
+n_tau = 100 
+tautestfit = run_tau_test(glm_fit0, GRM, n_tau, species_id = "species_test", tau0=1, phi0=1, seed=63)
 ```
 
 Calculate the p-value from the permutation test.
@@ -118,36 +153,38 @@ pvalue = (sum(tautestfit$t >= glmm_fit$t) + 1)/n_tau
 
 <img src="https://github.com/miriam-goldman/microSLAM/blob/main/other/permutationnew.png" with=400>
 
-In this case, the observed $\tau$ value (red vertical line) is larger than all $\tau$ values from 100 permutations that break the association between population structure and y (histogram shows permutation null distribution). This indicates that there is significant population structure for this species that is associated with y. To get a more precise p-value, more permutations could be run.  
+In this case, the observed $\tau$ value (represented by the red vertical line) is greater than 
+all $\tau$ values derived from 100 permutations, where the association between population and `y` was randomized. 
+The histogram illustrated that the null distribution of $\tau$ values from these permutations.
+This result suggests that population structure is significantly associated with y for this species. 
+To obtain a more precise p-value, additional permutations can be conducted.
 
-Code to plot pvalues:
+R code to plot p-values from the permutation test:
 
 ```
 ggplot(tautestfit,aes(t))+
-geom_histogram(bins = 30)+
-geom_vline(xintercept = glmm_fit$t,color ="red")+
-theme_minimal(base_size = 16)
+  geom_histogram(bins = 30)+
+  geom_vline(xintercept = glmm_fit$t,color ="red")+
+  theme_minimal(base_size = 16)
 ```
 
 ### Step 3: $\beta$ test for gene-trait associations
 
-Having detected population structure associated with the trait y, next fit a series of mixed effects models to test each gene for associations with y that are independent from the overall strain association. Rapidly gained and lost genes may have such independent associations. First, transform the gene data to a long matrix to fit each gene separately. If memory is a problem the gene data can be overwritten but we will use the square matrix to look into strain difference.
+After detecting population structure associated with the trait (`y`), 
+the next step is to fit a series of mixed effects models to evaluate independent associations
+between each gene and `y`,
+while adjusting for population structure using the random effects estimated in Step 2.
+A t-testis then performed to assess the significance of each gene's association with y ($\beta$).
 
-```
-gene_long = exp_genedata %>%
-    pivot_longer(cols = starts_with("gene"),
-    names_to = "gene_id",
-    values_to = "gene_value") %>%
-    as.data.frame()
-```
-
-Fit a series of mixed effects glm models, one for each gene, that adjust for population structure using the random effects from Step two and perform a t-test to assess the significance of each gene's association with y ($\beta$).
+Genes that are rapidly gained or lost may exhibit such independent associations.
 
 ```  
-gene_test_df = fit_beta(glmm_fit,glm_fit0,GRM,gene_long,SPA=TRUE)
+gene_test_df = fit_beta(glmm_fit, glm_fit0, GRM, exp_genedata, SPA=TRUE)
 ```
 
-Plot a volcano plot of the results showing each gene's $\beta$ value versus its p-value. In this simulated data genes 1, 2, and 3 have been generated with associations that exceed the strain association. The genes with p-values of 0.005 or smaller are colored in red and correspond to these three genes.
+Generate a volcano plot displaying each gene’s $\beta$ value against its p-value. 
+In this simulated dataset, genes 1, 2, and 3 were designed to exhibit associations that surpass the strain association. 
+Genes with p-values ≤ 0.005 are highlighted in red, corresponding to these three significant genes.
 
 ```
 ggplot(gene_test_df,aes(beta,-log10(SPA_pvalue)))+
@@ -169,45 +206,61 @@ Example output dataframe for $\beta$ test
 Columns are:
 
 ```
-species_id: the id of the bacterial species
-tau: estimate for tau genetic variance variable
-gene_id: gene id for each gene
-cor: correlation between the y variable and the gene data for that gene
-cor_to_b: correlation between the random b variable and the gene data for that gene, which indicates genes driving overall strain-trait associations
-z: z value estimated for gene from GLMM
-var1: variance estimated for gene from GLMM
-beta: beta estimate for gene from GLMM
-se_beta: standard error for beta estimated from GLMM
-t_adj: t value adjusted estimated from GLMM
-SPA_pvalue: saddle point adjusted pvalue from GLMM
-spa_score: saddle point adjusted t score from GLMM
-SPA_zvalue:  saddle point adjusted z value from GLMM
-pvalue_noadj: pvalue not adjusted from saddle point approximation
-converged: did the saddle point adjustment (spa) algorithm converge or not
+species_id: Identifier of the bacterial species
+tau: Estimate for tau genetic variance variable
+gene_id: Unique identifier for each gene.
+cor: Correlation between the response variable (y) and the gene presence/absence data
+cor_to_b: Correlation between the random effects variable (b) and the gene data, indicating genes that contribute tp overall strain-trait associations
+z: Z-score estimate for each gene from the GLMM
+var1: Variance estimate for each gene from the GLMM
+beta: Regressuin coefficient (beta) estimate for each gene from the GLMM
+se_beta: Standard error for beta estimate from the GLMM
+t_adj: Adjusted t value estimate from the GLMM
+SPA_pvalue: Saddlepoint-adjusted pvalue from the GLMM
+spa_score: Saddlepoint-adjusted t-score from the GLMM
+SPA_zvalue: Saddle point adjusted z-score from the GLMM
+pvalue_noadj: Unadjusted pvalue
+converged: Indicates whether the SPA algorithm sucessfully converted or not
 ```
 
-To visualize genes that contribute the most to the strain-trait association, each gene's correlation with the random effects vector b can be computed and the top correlated genes identified. In this example, genes with correlation above 0.4 are identified.
+To identify genes that contribute most to the strain-trait association, 
+the correlation between each gene and the random effects vector (b) was computed. 
+The top correlated genes can then be selected based on their correlation values. 
+In this example, genes with a correlation greater than 0.4 are plotted.
 
 ```
 strain_genes = gene_test_df %>%
  filter(abs(cor_to_b) > .4)
-rownames(exp_genedata) = exp_genedata$sample_name
-strain_genes_values = exp_genedata[,strain_genes$gene_id]
+  rownames(exp_genedata) = exp_genedata$sample_name
+  strain_genes_values = exp_genedata[,strain_genes$gene_id]
 
 pheatmap(strain_genes_values,
-show_rownames=FALSE,
-show_colnames=FALSE,
-treeheight_row=0,
-treeheight_col = 0,
-labels_row = "samples",
-labels_col = "samples",
-main = paste("Strain Associated Genes"),
-border_color = NA,
-annotation_row = exp_metadata[,-5],
-color = myColor,
-clustering_method = "average")
+  show_rownames=FALSE, show_colnames=FALSE,
+  treeheight_row=0, treeheight_col = 0,
+  labels_row = "samples", labels_col = "samples",
+  main = paste("Strain Associated Genes"),
+  border_color = NA,
+  annotation_row = exp_metadata[,2:5],
+  color = myColor,
+  clustering_method = "average")
 ```
 
 <img src="https://github.com/miriam-goldman/microSLAM/blob/main/other/strainheatmap.png?raw=true">
 
-300 genes were modeled from the strain, and 288 of these have a correlation with b that exceeds 0.4. Samples could be clustered using these genes, and the genes can be considered as markers for the clades within the population structure of the species.
+A total of 300 genes were modeled from the strain, with 288 genes exhibiting a correlation greater than 0.4 with the random effects vector (b). 
+These genes could be used to cluster samples, serving as markers for clades within the population structure of the species.
+
+## Run the full microSLAM pipeline
+
+We also offer a wrapper function that allows users to execute all the above steps in a single workflow, 
+including GRM computation, GLM fitting, tau estimation, permutation testing, and gene association testing.
+
+We strongly recommend that users customize the `run_microslam` function to suit their specific analysis needs.
+
+```
+run_microslam(exp_genedata, exp_metadata, data.frame(gene_id = colnames(exp_genedata)[-1]), 
+              GRM, "species_test", "./example_output", "./example_log", do_SPA = TRUE, 
+              formula_string = "y ~ age + 1", response_var = "y", 
+              family = "binomial", n_tau = 100, verbose = TRUE)
+```
+

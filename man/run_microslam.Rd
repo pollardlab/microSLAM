@@ -15,19 +15,20 @@ run_microslam(
   do_SPA = FALSE,
   formula_string = "y ~ age + 1",
   response_var = "y",
-  glm_family = "binomial",
-  verbose = TRUE,
-  n_tau = 1000
+  family = "binomial",
+  verbose = FALSE,
+  n_tau = 1000,
+  debug = FALSE
 )
 }
 \arguments{
-\item{sample_by_gene_to_test}{A data frame with gene expression values per sample.}
+\item{sample_by_gene_to_test}{A data frame with binary gene presence/absence.}
 
-\item{samples_to_test}{A data frame containing sample metadata.}
+\item{samples_to_test}{A metadata data frame for samples, with sample_name as first column.}
 
-\item{genes_to_test}{A data frame listing the genes to be tested.}
+\item{genes_to_test}{A metadata data frame for genes, with gene_id as first column.}
 
-\item{GRM_to_test}{The genomic relationship matrix (GRM).}
+\item{GRM_to_test}{A data frame for the genomic relationship matrix (GRM).}
 
 \item{species_id}{Character. Species identifier.}
 
@@ -35,17 +36,19 @@ run_microslam(
 
 \item{logdir}{Character. Directory for storing log files.}
 
-\item{do_SPA}{Run saddle point estimation (default = FALSE)}
+\item{do_SPA}{Logical. Whether to run saddlepoint approximation (SPA) for p-value estimation (default: \code{FALSE}).}
 
 \item{formula_string}{Character. Model formula (default = \code{"y ~ age + 1"}).}
 
 \item{response_var}{Character. Name of the response variable (default = \code{"y"}).}
 
-\item{glm_family}{Family in GLM (default = 'binomial')}
+\item{family}{Family in GLM (default = 'binomial')}
 
-\item{verbose}{Logical (default = TRUE)}
+\item{verbose}{Logical (default = FALSE)}
 
 \item{n_tau}{Integer. Number of tau permutations (default = \code{1000}).}
+
+\item{debug}{Logical (default = FALSE) Only for developing debug purpose}
 }
 \value{
 A fitted GLMM model (\code{glmm_fit}).
@@ -53,8 +56,7 @@ A fitted GLMM model (\code{glmm_fit}).
 \description{
 This function runs the microSLAM analysis pipeline, which includes:
 \itemize{
-\item Tau test for strain-level association
-\item Beta test for gene-level association
-\item Saving all results to specified directories.
+\item Tau test for strain-level trait association, with permutation test for p value
+\item Beta test for gene-level trait association.
 }
 }
