@@ -76,7 +76,7 @@ get_coef_inner <- function(Y, X, W, var_vec, grm) {
   return(coef_list)
 }
 
-get_alpha <- function(y, X, var_vec, grm, family, alpha0, eta0, offset, maxiter, tol.coef = tol) {
+get_alpha <- function(y, X, var_vec, grm, family, alpha0, eta0, offset, maxiter=100, tol.coef=0.0001) {
   # Adapted from Get_Coef from SAIGE package
   mu = family$linkinv(eta0)
   mu_eta = family$mu.eta(eta0)
@@ -278,7 +278,7 @@ for_beta <- function(mu, mu2, y, X) {
 }
 
 
-fit_beta_one_gene <- function(glmm_fit, glm_fit0, grm, one_gene_df, SPA = FALSE) {
+fit_beta_one_gene <- function(glmm_fit, glm_fit0, grm, one_gene_df, SPA) {
   # Function: fit_beta_one_gene
   # Args:
   # - glmm_fit: Output from the fit_tau_test function
@@ -353,11 +353,13 @@ fit_beta_one_gene <- function(glmm_fit, glm_fit0, grm, one_gene_df, SPA = FALSE)
 #' @param phi0 inital phi estimate (variance on means of outputs will be 1 for logit or binonimal dispersion)
 #' @param maxiter maximum iterations to fit the glmm model
 #' @param verbose whether outputting messages in the process of model fitting
+#' @param tol tolence for variance estimation
 #' @param log_file log file to write to
+#' @param debug print more details if debug. (Developer only)
 #' @return model output for the tau test on population structure 
 #' @importFrom logr log_open log_print log_close
 #' @export
-fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter = 100, verbose = TRUE, tol = .0001, log_file = NA) {
+fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0 = 1, maxiter = 100, verbose = TRUE, tol = 0.0001, log_file = NA, debug= FALSE) {
   # Fits the null generalized linear mixed model for a binary trait
   # Adapted from glmmkin.ai_PCG_Rcpp_Binary from SAIGE package
   # Args:
@@ -365,17 +367,15 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
   #  grm: Genetic Relatedness Matrix  in the same sample order as glm.fit0!
   #  species_id: Species ID of the species for record
   #  tau0: initial values for the variance component parameter tau
-  #  phi0: initial values for the variance component parameter phi (only for quant)
+  #  phi0: initial values for the variance component parameter phi (only for quantitative)
   #  maxiter: maximum iterations to fit the glmm model
   #  verbose: whether outputting messages in the process of model fitting
-  #  tol: tolance for varaince estimates
+  #  tol: tolerance for variance estimates
   #  log_file: whether to write to a log file and what that would be
   # Returns:
   #  model object pop.struct.glmm
 
   log_file = ifelse(is.na(log_file), file.path(tempdir(), "microSLAM.log"), log_file)
-
-  t_begin = proc.time()
   
   log_open(log_file, logdir = F, show_notes = F)
   log_print("====fit_tau_test::start::====", console = verbose)
@@ -418,8 +418,8 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
   }
 
   var_vec=var_vec0
-  log_print(paste("====get_alpha::initial var_vec:: ", paste(round(var_vec, 4), collapse = ", "), sep = ""), console = verbose)
-
+  log_print(paste("====fit_tau_test::initial tau phi:: ", paste(round(var_vec, 4), collapse = ", "), sep = ""), console = verbose)
+  
   ## Fixed-effect coefficients => alpha.obj$alpha
   alpha.obj = get_alpha(y, X, var_vec0, grm, family, alpha0, eta0, offset, maxiter = maxiter, tol.coef = tol)
  
@@ -432,10 +432,11 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
     re = get_AI_score(alpha.obj$Y, X, grm, alpha.obj$W, var_vec0, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var)
     var_vec[2] = max(0, as.numeric(var_vec0[2] + var_vec0[2]^2 * ((re$YPAPY - re$trace_P_grm)) / n)) # first fit vars
   }
-  log_print(paste("====get_AI_score::var_vec::", paste(round(var_vec, 4), collapse = ", ")), console = verbose)
+  if (debug) {
+    log_print(paste("====get_AI_score::var_vec::", paste(round(var_vec, 4), collapse = ", ")), console = verbose)
+  }
 
   t_begin_fit_tau = proc.time()
-
   tol_limt = FALSE
   list_of_log_messages <- list()
   for (i in seq_len(maxiter)) {
@@ -461,7 +462,6 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
 
     list_of_log_messages[[i]] = paste("  ===fit_vars::iteration ", i, "::var_vec ", paste(round(var_vec, 4), collapse = ", "), sep = "")
     
-    #if(sum(res^2)/n < tol) break
     if (var_vec[1] <= 0) {
       stop("\nERROR! The first variance component parameter estimate is 0\n")
     }
@@ -483,9 +483,11 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
     }
   }
   t_end_fit_tau = proc.time()
-
-  for (msg in list_of_log_messages) {
-    log_print(msg, console = verbose)
+  
+  if(debug) {
+    for (msg in list_of_log_messages) {
+      log_print(msg, console = verbose)
+    }
   }
   
   if (max(var_vec) > tol^(-2) | i == maxiter) {
@@ -513,8 +515,7 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
         var_vec[2] = max(0, var_vec0[2] + var_vec0[2]^2 * (fit.final$YPAPY - fit.final$trace_P_grm) / n)
         var_vec[1] = max(tol*10, var_vec0[1] + var_vec0[1]^2 * (fit.final$YPwPY - fit.final$trace_PW) / n)
         i = maxiter
-        
-      }else{
+      } else {
         fit.final = get_AI_score_quant(alpha.obj$Y, X, grm, alpha.obj$W, var_vec, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var)
         var_vec[2] = max(0, var_vec0[2] + var_vec0[2]^2 * (fit.final$YPAPY - fit.final$trace_P_grm) / n)
         var_vec[1] = max(tol*10, var_vec0[1] + var_vec0[1]^2 * (fit.final$YPwPY - fit.final$trace_PW) / n)
@@ -524,7 +525,6 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
       fit.final = get_AI_score(alpha.obj$Y, X, grm, alpha.obj$W, var_vec, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var)
       var_vec[2] = max(0, as.numeric(var_vec0[2] + var_vec0[2]^2 * ((fit.final$YPAPY - fit.final$trace_P_grm)) / n)) # tau + Dtau 
     }
-
   }
   
   if (quant) {
@@ -534,8 +534,8 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
   }
   forbeta.obj = for_beta(mu, mu2, y, Xorig)
   
-  log_print(paste("====fit_tau_phi::final var_vec::", paste(round(var_vec, 4), collapse = ", ")), console = verbose)
-  log_print(paste("====fit_tau_phi elapsed time:"), console = verbose)
+  log_print(paste("====fit_tau_test::final tau phi::", paste(round(var_vec, 4), collapse = ", ")), console = verbose)
+  log_print(paste("====fit_tau_test elapsed time:"), console = verbose)
   log_print(t_end_fit_tau - t_begin_fit_tau, console = verbose)
   
   converged = ifelse(i < maxiter, TRUE, FALSE)
@@ -590,16 +590,8 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
     "species_id" = species_id #,#grm = grm #<- we dont' need to carry GRM around
   )
   class(glmm_result) = "pop.struct.glmm"
-  t_end = proc.time()
-
-  log_print(paste("====total elapsed time:"), console = verbose)
-  log_print(t_end - t_begin, console = verbose)
   log_print("====fit_tau_test::end::====", console = verbose)
-  for (msg in summary.pop.struct.glmm(glmm_result)) {
-    log_print(msg, console = verbose)
-  }
   log_close()
-
   return(glmm_result)
 }
 
@@ -614,9 +606,10 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
 #' @param species_id species id for bacterial species
 #' @param tau0 starting tau
 #' @param phi0 starting phi
-#' @return df of values of T for tau for different permutations of the covarites matrix
+#' @param seed random seed
+#' @return data frame of values of T for tau for different permutations of the covarites matrix
 #' @export
-run_tau_test <- function(glm.fit0, grm, n_tau, species_id = "s_id", tau0, phi0, seed=1) {
+run_tau_test <- function(glm.fit0, grm, n_tau, species_id, tau0, phi0, seed=100) {
   set.seed(seed)
   list_of_tau = lapply(seq(1, n_tau), function(x) simulate_tau_inner(glm.fit0, grm, species_id = species_id, tau0, phi0))
   df_of_tau = do.call(rbind, list_of_tau)
@@ -652,7 +645,6 @@ fit_beta <- function(pop.struct.glmm, glm.fit0, grm, sample_by_gene_df, SPA = FA
   list_of_samples_from_glmm = pop.struct.glmm$sample_names
   stopifnot(all.equal(rownames(grm), list_of_samples_from_glmm))
   
-  stopifnot(colnames(sample_by_gene_df)[1] == "sample_name")
   sample_by_gene_df <- sample_by_gene_df %>% as.data.frame() 
   rownames(sample_by_gene_df) <- sample_by_gene_df$sample_name
   
@@ -674,7 +666,6 @@ fit_beta <- function(pop.struct.glmm, glm.fit0, grm, sample_by_gene_df, SPA = FA
       cat(t_now - t_begin)
       cat("\n")
     }
-    
     one_gene_df <- sample_by_gene_df %>% select(sample_name, all_of(my_gene))
     ret <- fit_beta_one_gene(pop.struct.glmm, glm.fit0, grm, one_gene_df, SPA=SPA)
     list_of_rets[[my_gene]] <- ret
@@ -686,8 +677,143 @@ fit_beta <- function(pop.struct.glmm, glm.fit0, grm, sample_by_gene_df, SPA = FA
   cat("\n")
 
   genes_test_df <- bind_rows(list_of_rets)
-
   return(genes_test_df)
+  
+}
+
+
+#' Run Beta test for all genes
+#'
+#' Runs a beta test on all genes using GLM and GLMM models.
+#'
+#' @param sample_by_gene_df A data frame with gene expression values per sample.
+#' @param glm_fit0 The null GLM model.
+#' @param glmm_fit The fitted GLMM model.
+#' @param GRM The genomic relationship matrix (GRM).
+#' @param genes_to_test A data frame of genes to test.
+#' @param do_spa Logical. If TRUE, use Saddlepoint Approximation (SPA).
+#' @return A data frame with beta test results.
+#' @export
+run_beta_test <- function(sample_by_gene_df, glm_fit0, glmm_fit, GRM, genes_to_test, do_spa=TRUE) {
+  
+  if (!all(colnames(GRM) == glmm_fit$sample_names)) {
+    stop("Error: Column names in GRM do not match sample names in glmm_fit.")
+  }
+  # Fit beta model
+  genes_test_df <- fit_beta(glmm_fit, glm_fit0, GRM, sample_by_gene_df, SPA=do_spa)
+  
+  if (do_spa) {
+    genes_test_df <- genes_test_df %>% 
+      arrange(SPA_pvalue) %>%
+      mutate(SPA_pvalue = ifelse(is.na(SPA_pvalue), 1, SPA_pvalue))
+  } else {
+    genes_test_df <- genes_test_df %>%
+      arrange(pvalue_noadj)
+  }
+  
+  genes_tested <- left_join(genes_to_test, genes_test_df, by=c("gene_id" = "gene_id"))
+  return(genes_tested)
+}
+
+
+#' Run microSLAM Analysis
+#'
+#' This function runs the microSLAM analysis pipeline, which includes:
+#' - Tau test for strain-level trait association, with permutation test for p value
+#' - Beta test for gene-level trait association.
+#'
+#' @param sample_by_gene_to_test A data frame with binary gene presence/absence.
+#' @param samples_to_test A metadata data frame for samples, with sample_name as first column.
+#' @param genes_to_test A metadata data frame for genes, with gene_id as first column.
+#' @param GRM_to_test A data frame for the genomic relationship matrix (GRM).
+#' @param species_id Character. Species identifier.
+#' @param outdir Character. Directory for saving output files.
+#' @param logdir Character. Directory for storing log files.
+#' @param formula_string Character. Model formula (default = `"y ~ age + 1"`).
+#' @param family Family in GLM (default = 'binomial')
+#' @param do_SPA Logical. Whether to run saddlepoint approximation (SPA) for p-value estimation (default: `FALSE`).
+#' @param verbose Logical (default = FALSE)
+#' @param debug Logical (default = FALSE) Only for developing debug purpose
+#' @param response_var Character. Name of the response variable (default = `"y"`).
+#' @param n_tau Integer. Number of tau permutations (default = `1000`).
+#'
+#' @return A fitted GLMM model (`glmm_fit`).
+#' @export
+#' @importFrom stats glm
+#' @importFrom dplyr mutate arrange left_join
+#' @importFrom utils write.table
+#' @importFrom Matrix Matrix
+#' @importFrom pROC auc
+#' @importFrom stats as.formula
+run_microslam <- function(sample_by_gene_to_test, samples_to_test, genes_to_test, 
+                          GRM_to_test, species_id, outdir, logdir, do_SPA = FALSE,
+                          formula_string = "y ~ age + 1", response_var = "y", 
+                          family = "binomial", verbose = FALSE, n_tau = 1000, debug=FALSE) {
+  
+  # Ensure output and log directories exist
+  if (!dir.exists(outdir)) dir.create(outdir, recursive = TRUE, showWarnings = F)
+  if (!dir.exists(logdir)) dir.create(logdir, recursive = TRUE, showWarnings = F)
+  
+  # Define log file path
+  log_file = file.path(logdir, paste0("fit_tau_test_", response_var, "_", species_id, ".log"))
+  
+  # Step 1.1: Fit null GLM model
+  glm_fit0 = glm(as.formula(formula_string), data = samples_to_test, family = family)
+  
+  # Step 1.2: Fit GLMM model
+  glmm_fit = fit_tau_test(glm_fit0, GRM_to_test, species_id, verbose = verbose, log_file = log_file, debug = debug)
+  
+  # Save GLM and GLMM models
+  saveRDS(glm_fit0, file.path(outdir, paste0("glm_fit0_", response_var, "_", species_id, ".rds")))
+  saveRDS(glmm_fit, file.path(outdir, paste0("glmm_fit_", response_var, "_", species_id, ".rds")))
+
+  # Step 1.3: Permutation based pvalue compute
+  pvalue = NA
+  if (n_tau > 0) {
+    simulate_tau = run_tau_test(glm_fit0, GRM_to_test, n_tau, species_id, tau0 = 1, phi0 = 1, seed = 100)
+    
+    # Compute permutation-based p-value
+    pvalue = max(sum(simulate_tau$t > glmm_fit$t) / n_tau, 1 / (n_tau * 10))
+    
+    min_pvalue = 1 / (n_tau * 10)  # Minimum possible p-value
+    pvalue = ifelse(pvalue == 0, min_pvalue, pvalue)
+    
+    simulate_tau$species_id = species_id
+    simulate_tau %>% 
+      select(species_id, everything()) %>%
+      write.table(file.path(outdir, paste0("permutation_tau_", species_id, ".tsv")), sep = "\t", quote = F, row.names = F)
+  }
+  
+  # Step 2: Run beta test for gene-trait assocaition
+  genes_tested = run_beta_test(sample_by_gene_to_test, glm_fit0, glmm_fit, GRM_to_test, genes_to_test, do_spa = do_SPA)
+  
+  saveRDS(genes_tested, file.path(outdir, paste0("genes_tested_", response_var, "_", species_id, ".rds")))
+  
+  # Step 3: Summarize GLMM results
+  summary_df = data.frame(
+    species_id = species_id, 
+    tau = glmm_fit$tau, 
+    iters = glmm_fit$iter_finised, 
+    pvalue = pvalue, 
+    converge = glmm_fit$converged
+  )
+  
+  # Extract GLM coefficients and model statistics
+  glm_summary = data.frame(t(glm_fit0$coefficients)) %>%
+    mutate(
+      formula = paste(deparse(glm_fit0$formula), collapse = " "), 
+      family = glm_fit0$family[[1]], 
+      AIC = glm_fit0$aic
+    )
+  
+  # Combine summary results
+  final_summary = cbind(summary_df, glm_summary)
+  
+  # Save summary to a TSV file
+  write.table(final_summary, file.path(outdir, paste0("microslam_", response_var, "_", species_id, ".tsv")), 
+              sep = "\t", row.names = FALSE, quote = FALSE)
+  
+  invisible(NULL)
 }
 
 
@@ -696,6 +822,7 @@ fit_beta <- function(pop.struct.glmm, glm.fit0, grm, sample_by_gene_df, SPA = FA
 #' Summarize the output of fit tau test
 #'
 #' @param x a pop.struct.glmm objecct the output of fit_tau_test; GLMM of species with grm accounted for
+#' @param ... Additional arguments passed to other summary methods.
 #' @export summary.pop.struct.glmm
 #' @export 
 summary.pop.struct.glmm <- function(x, ...) {
@@ -712,6 +839,8 @@ summary.pop.struct.glmm <- function(x, ...) {
 }
 
 #' ... all the usual documentation for summary() ...
+#' @param x An object to summarize.
+#' @param ... Additional arguments passed to other summary methods.
 #' @export
 summary <- function(x, ...) {
   UseMethod("summary")
@@ -735,7 +864,7 @@ filter_pop_obj <- function(pop.struct.glmm, sample_indexs) {
 }
 
 
-########
+######## SADDLE POINTS
 saddle_prob <- function(q, mu, g, var1, cutoff = 2, log.p = FALSE) {
   #### taken from ‘SPAtest’ with a few changes for use case
   m1 = sum(mu * g)
@@ -917,9 +1046,16 @@ K2 <- function(t, mu, g) {
   return(out)
 }
 
+add_logp<-function(p1,p2) {
+  #### From ‘SPAtest' package
+  p1<- -abs(p1)
+  p2<- -abs(p2)
+  maxp<-max(p1,p2)
+  minp<-min(p1,p2)
+  return(maxp+log(1+exp(minp-maxp)))
+}
 
-
-########
+######## CHECK
 check_gene_matrix <- function(gene_matrix) {
   ### function to check gene matrix is as expected for creation of GRM"
   # gene_matrix NxM+1  matrix with column sample_name, N is number of samples, M is number of genes
@@ -991,7 +1127,7 @@ check_inputs_tau <- function(glm.fit0,grm,species_id,tau0,phi0,maxiter,tol,verbo
   if(tau0 <= 0 | phi0 <= 0){
     stop("tau0 and phi0 must be a postive number")
   }
-  check_grm(grm,glm.fit0,verbose)
+  check_grm(grm, glm.fit0, verbose)
 }
 
 check_beta <- function(pop.struct.glmm, glm.fit0, grm, gene_df, SPA = FALSE) {
