@@ -25,8 +25,9 @@ Step two calculates the association between population structure and the trait (
 Install package in R
 
 ```
+install.packages("devtools")
 library(devtools)
-install_github('pollardlab/microSLAM')
+devtools::install_github('pollardlab/microSLAM')
 library(microSLAM)
 ```
 
