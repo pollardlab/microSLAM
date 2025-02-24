@@ -14,5 +14,5 @@ dependencies:
   - r-ggextra
   - r-rcppxptrutils
   - r-paralleldist
-  - r-ape
   - r-devtools
+  - r-dt

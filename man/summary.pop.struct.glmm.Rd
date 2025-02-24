@@ -8,6 +8,8 @@
 }
 \arguments{
 \item{x}{a pop.struct.glmm objecct the output of fit_tau_test; GLMM of species with grm accounted for}
+
+\item{...}{Additional arguments passed to other summary methods.}
 }
 \description{
 Summarize the output of fit tau test

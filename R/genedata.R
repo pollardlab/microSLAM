@@ -1,4 +1,4 @@
-#' Example gene data, example output from MIDAS3
+#' Example gene data, example output from MIDAS
 #'
 #' @docType data
 #'
@@ -7,7 +7,6 @@
 #' @format An object of class dataframe, simulated for example
 #'
 #' @keywords datasets
-#'
 #'
 #' @examples
 #' data(exp_genedata)

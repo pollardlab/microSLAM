@@ -6,6 +6,11 @@
 \usage{
 summary(x, ...)
 }
+\arguments{
+\item{x}{An object to summarize.}
+
+\item{...}{Additional arguments passed to other summary methods.}
+}
 \description{
 ... all the usual documentation for summary() ...
 }

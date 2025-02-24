@@ -1,67 +1,41 @@
-### Functions needed to run mircoSLAM, software for performing metagenome-wide association studies (MWAS)
-### The approach is to fit generalized linear mixed effects models (GLMMs) and use them to test for trait associations
+### Functions required to run mircoSLAM, a R package for performing metagenome-wide association studies (MWAS)
 ###
-### Code for fitting GLMMs (REML AI) is adapted from the SAIGE package (GNU GPL):
+### The methodology involves fitting generalized linear mixed effects models (GLMMs) for trait associations.
+###
+### The GLMM fitting code (REML AI) is adapted from the SAIGE package (GNU GPL):
 ###   https://saigegit.github.io/SAIGE-doc/
-###  Methodology and equations are described in the supplement of this paper: 
-###   Zhou W, Nielsen JB, Fritsche LG, Dey R, Gabrielsen ME, Wolford BN, LeFaive J,
-###   VandeHaar P, Gagliano SA, Gifford A, Bastarache LA, Wei WQ, Denny JC, Lin M, 
-###   Hveem K, Kang HM, Abecasis GR, Willer CJ, Lee S. 
-###   Efficiently controlling for case-control imbalance and sample relatedness in large-scale genetic association studies. 
-###   Nature Genetics. 2018
-###   doi: 10.1038/s41588-018-0184-y
-### Functions for saddle point approximation (SPA) are from the SPAtest package (GNU GPL): 
+### The methodology and equations are detailed in the supplementary
+### material of the following paper:
+### Zhou, W., Nielsen, J. B., Fritsche, L. G., Dey, R., Gabrielsen, M. E., Wolford, B. N., LeFaive, J., et al.
+### "Efficiently Controlling for Case-Control Imbalance and Sample Relatedness in Large-Scale Genetic Association Studies."
+### Nature Genetics 50 (2018): 1335–1341. https://doi.org/10.1038/s41588-018-0184-y.
+###
+### The saddle point approximation (SPA) code are from the SPAtest package (GNU GPL):
 ###   https://github.com/leeshawn/SPAtest
+
 
 #' calculate_grm
 #'
-#' calculate the genetic relatedness matrix from the gene matrix
+#' This function alculates genetic relatedness matrix (GRM) from sample-by-gene matrix
 #'
-#' @param gene_matrix must have first column as sample names and other columns as gene names
+#' @param sample_by_gene_matrix must have first column as sample names and other columns as gene names
 #' @return grm genetic relatedness matrix for tau and beta test
 #' @export
-calculate_grm <- function(gene_matrix) {
-  check_gene_matrix(gene_matrix)
-  freq_mat_dist_man = parDist(as.matrix(gene_matrix[, -1]), method = "manhattan") / (ncol(gene_matrix[, -1]) - 1)
+calculate_grm <- function(sample_by_gene_matrix) {
+  check_gene_matrix(sample_by_gene_matrix)
+  freq_mat_dist_man = parDist(as.matrix(sample_by_gene_matrix[, -1]), method = "manhattan") / (ncol(sample_by_gene_matrix[, -1]) - 1)
   freq_mat_dist_man = as.matrix(freq_mat_dist_man)
   freq_mat_grm_man = 1 - freq_mat_dist_man
   grm = as.matrix(freq_mat_grm_man)
-  colnames(grm) = as.matrix(gene_matrix[, 1])
+  colnames(grm) = as.matrix(sample_by_gene_matrix[, 1])
   rownames(grm) = colnames(grm)
   return(grm)
 }
 
-check_gene_matrix <- function(gene_matrix) {
-  ### function to check gene matrix is as expected for creation of GRM"
-  # gene_matrix NxM+1  matrix with column sample_name, N is number of samples, M is number of genes
- if(!colnames(gene_matrix)[1] == "sample_name"){
-   warning("first column in gene matrix is not sample_name this might cause unexpected behavior")
- }
-  if(typeof(gene_matrix[,1]) != "character"){
-    warning("first column in gene matrix is expected to be sample_name, if this is not the sample name and is a value of a gene, this will not be included in the computation.")
-  }
-  if(any(duplicated(gene_matrix[,1]))){
-    stop("gene matrix should not have any duplicated sample names, sample names should be unique.")
-  }
-  if(any(is.na(gene_matrix[,1]))){
-    stop("gene matrix should not have any NA sample names, sample names should be unique.")
-  }
-  if(!all(apply(gene_matrix[,-1],2,function(x) all(!is.na(as.numeric(x)))))){
-    stop("all columns besides the first column should be numeric")
-  }
-  if((ncol(gene_matrix)) < 3 | ncol(gene_matrix) < nrow(gene_matrix)){
-    warning("gene matrix does not have as many columns as rows, gene matrix should be a gene X sample matrix, if there are not many genes, the GRM will less precise.")
-  }
-  if(!is.data.frame(gene_matrix)){
-    warning("gene_matrix is not a data frame, could cause unexpected behavior")
-  }
-}
-
-
 gen_sigma <- function(W, var_vec, grm) {
-  ### update grm with W and var_vec
-  # grm is an (nxn) symmetric matrix
-  # adapted from SAIGE package
+  # Generate covariance matrix sigma for GLMM
+  # sigma = phi * diag(1 / W) + tau * GRM
+  # Adapted from getDiagOfSigma and get_sp_Sigma from SAIGE package  
   grm = as.matrix(grm)
   dtkin = W^-1 * (var_vec[1]) 
   new_grm = grm * var_vec[2]
@@ -72,136 +46,148 @@ gen_sigma <- function(W, var_vec, grm) {
 }
 
 get_coef_inner <- function(Y, X, W, var_vec, grm) {
+  # This function calculate fixed and random effect coefficients Equation 3 and Equation 4
   # Y is working vector Y=alpha X + b
-  # n number of samples
-  # N number of covariates
-  # X (nxN) covariates
+  # X: sample-by-covariate matrix
   # W coefficient of variation
-  # var_vec is the variances of phi of the y varaible and tau of the population structure
-  # adapted from SAIGE package
+  # var_vec is the variance component [tau, phi]
+  # Adapted from cpp::getCoefficients in SAIGE package
   simga = gen_sigma(W, var_vec, grm) # V
   Y = as.vector(Y)
-  sigmai = Rfast::spdinv(simga) 
+  sigmai = Rfast::spdinv(simga)
+
   if(all(is.na(sigmai))){
     print("While fitting Sigma, a transformation of the GRM became singular or was not symmetrical, this can happen when many columns of the GRM are highly correlated to the y, or when there is not enough varaiblity in the GRM.")
     stop()
   }
+
   sigmai_Y = sigmai %*% Y # V^-1 Y
   sigmai_X = sigmai %*% X # V^-1 X
   cov_var = Matrix::solve(forceSymmetric(t(X) %*% sigmai_X), sparse = TRUE, tol = 1e-10) # (Xt V^-1 X)^-1
   sigmai_Xt = t(sigmai_X) # t(V^-1 X)
   sigmaiXtY = sigmai_Xt %*% Y # XtV^-1Y
+  # Equation 3
   alpha = cov_var %*% sigmaiXtY # (Xt V X)^-1 XtVY
   epsilon = var_vec[1] *(t(sigmai_Y) - t(sigmai_X %*% alpha)) / as.vector(W) # phi to act on W
+  # Updated working response
   eta = as.vector(Y - epsilon) # Y-var_vec \sigma (Y-X\alpha)
   b = eta - X %*% alpha
   coef_list = list("sigmai_Y" = sigmai_Y, "sigmai_X" = sigmai_X, "cov_var" = cov_var, "alpha" = alpha, "eta" = eta, "b" = b, "epsilon" = epsilon)
   return(coef_list)
 }
 
+get_alpha <- function(y, X, var_vec, grm, family, alpha0, eta0, offset, maxiter=100, tol.coef=0.0001) {
+  # Adapted from Get_Coef from SAIGE package
+  mu = family$linkinv(eta0)
+  mu_eta = family$mu.eta(eta0)
+
+  Y = eta0 - offset + (y - mu) / mu_eta
+  sqrt_W = mu_eta / sqrt(family$variance(mu)) # weight matrix
+  W = sqrt_W^2
+
+  for (i in 1:maxiter) {
+    alpha.obj = get_coef_inner(Y, X, W, var_vec, grm)
+
+    alpha = as.matrix(alpha.obj$alpha)
+    eta = as.matrix(alpha.obj$eta + offset)
+
+    mu = family$linkinv(eta)
+    mu_eta = family$mu.eta(eta)
+
+    Y = eta - offset + (y - mu) / mu_eta
+    sqrt_W = mu_eta / sqrt(family$variance(mu))
+    W = sqrt_W^2
+
+    if (max(abs(alpha - alpha0) / (abs(alpha) + abs(alpha0) + tol.coef)) < tol.coef) {
+      break
+    }
+    alpha0 = alpha
+  }
+
+  alpha_result = list("Y" = Y, "alpha" = alpha, "eta" = eta, "W" = W, "cov_var" = alpha.obj$cov_var, 
+                      "sqrt_W" = sqrt_W, "sigmai_Y" = alpha.obj$sigmai_Y, "sigmai_X" = alpha.obj$sigmai_X,
+                      "mu" = mu, "eta_2" = alpha.obj$eta_2, "b" = alpha.obj$b)
+  return(alpha_result)
+}
+
 get_AI_score <- function(Y, X, grm, W, var_vec, sigmai_Y, sigmai_X, cov_var) {
-  ## get score for finding var_vec function from supplement of Saige paper
-  ## Inputs Y, X, grm, W, Tau, sigmai_Y (sigma times inverse Y), sigmai_X (sigma times inverse X), cov_var
-  # adapted from SAIGE package
+  # Get AI score used to estimate var_vec from the supplementary materials of the SAIGE paper.
+  # Adapted from getAIScore from SAIGE package
   sigma = gen_sigma(W, var_vec, grm)
+
   sigmai =  Rfast::spdinv(sigma)
   sigmai_Xt = t(sigmai_X) # transpose sigma inverse times X
+  
   P = sigmai - sigmai_X %*% cov_var %*% sigmai_Xt # solve for P
+  
   PY1 = P %*% Y # \hat{Y}-\hat(X) (Xt V X)^-1 PY
+  
   APY = grm %*% PY1 # grm (\hat{Y}-\hat(X) (Xt V X)^-1)
   YPAPY = t(PY1) %*% APY # dot product
   YPAPY = YPAPY[1] 
+  
   PA = P %*% grm
   trace_P_grm = sum(diag(PA))
+  
   score1 = YPAPY - trace_P_grm
   PAPY = P %*% APY
+  
   AI = (t(PAPY) %*% APY) # AI=t(Y)%*%P%*%grm%*%P%*%grm%*%P%*%Y
-  return(list(YPAPY = YPAPY, PY = PY1, trace_P_grm = trace_P_grm, score1 = score1, AI = AI[1]))
+  return(list("YPAPY" = YPAPY, "PY" = PY1, "trace_P_grm" = trace_P_grm, "score1" = score1, "AI" = AI[1]))
 }
 
 get_AI_score_quant <- function(Y, X, grm, W, var_vec, sigmai_Y, sigmai_X, cov_var) {
-  ## quanitative y verion
-  ## get score for finding var_vec function from supplement of Saige paper 
+  ## Compute AI 2*2 matrix for quantative traits
   ## https://static-content.springer.com/esm/art%3A10.1038%2Fs41588-018-0184-y/MediaObjects/41588_2018_184_MOESM1_ESM.pdf
-  ## Inputs Y, X, grm, W, Tau, sigmai_Y, sigmai_X, cov_var
-  # adapted from SAIGE package
-  n = length(W)
+  # Adapted from getAIScore_q from SAIGE package
+  
+  # Compute sigma
   sigma = gen_sigma(W, var_vec, grm)
+  # Compute projection matrix P
   sigmai = Rfast::spdinv(sigma)
   sigmai_Xt = t(sigmai_X) # transpose X
   P = sigmai - sigmai_X %*% cov_var %*% sigmai_Xt
-  diag_P = diag(P) / (W)
   PY1 = P %*% Y # \hat{Y}-\hat(X) (Xt V X)^-1 PY
-  wPY = PY1 / (W)
-  YPwPY = t(PY1) %*% wPY
-  YPwPY = YPwPY[1]
+
   APY = grm %*% PY1
   YPAPY = t(PY1) %*% APY # dot product
   YPAPY = YPAPY[1] 
+  
   PA = P %*% grm
   trace_P_grm = (sum(sigmai * grm) - sum(sigmai_X * crossprod(grm, t(cov_var %*% sigmai_Xt))))
-  trace_PW = sum(diag_P)
+
   score1 = YPAPY - trace_P_grm # score 1
+
+  ## Quantitative
+  # compute wPY, this is equivalent to scale PY by the inverse of the phenotypic residual variance
+  wPY = PY1 / (W)
+  YPwPY = t(PY1) %*% wPY
+  YPwPY = YPwPY[1]
+
+  # compute SCORE statsitcs
+  diag_P = diag(P) / (W)
+  trace_PW = sum(diag_P)
   score0 = YPwPY - trace_PW # score 0 
+
   score_vector = as.matrix(c(score0[1], score1[1]))
+  
   PwPY = P %*% wPY
   PAPY = P %*% APY
+  
   AI_11 = (t(PAPY) %*% APY)
   AI_00 = (t(PwPY) %*% wPY)
   AI_01 = (t(PAPY) %*% wPY)
   AI_mat = matrix(c(AI_00[1], AI_01[1], AI_01[1], AI_11[1]), 2, 2)
-  Dtau = Matrix::solve(AI_mat, score_vector)
   
-  return(list(YPAPY = YPAPY, PY = PY1, YPwPY = YPwPY, trace_P_grm = trace_P_grm, trace_PW = trace_PW, AI = AI_mat, score_vector = score_vector))
+  return(list("YPAPY" = YPAPY, "PY" = PY1, "YPwPY" = YPwPY, "trace_P_grm" = trace_P_grm, "trace_PW" = trace_PW, "AI" = AI_mat, "score_vector" = score_vector))
 }
 
-for_beta_bin <- function(mu, y, X) {
-  ## score test for var_vec test used to fit beta test
-  ## inputs:
-  # fitted mu
-  # original y
-  # covariates X
-  # adapted from SAIGE package
-  mu2 = mu * (1 - mu)
-  V = as.vector(mu2)
-  res = as.vector(y - mu)
-  XV = t(X * V)
-  XVX = t(X) %*% (t(XV))
-  XVX_inv = Matrix::solve(XVX)
-  XXVX_inv = X %*% XVX_inv
-  XVX_inv_XV = XXVX_inv * V
-  S_a = colSums(X * res)
-  for_beta = list(XV = XV, XVX = XVX, XXVX_inv = XXVX_inv, XVX_inv = XVX_inv, S_a = S_a, XVX_inv_XV = XVX_inv_XV, V = V)
-  return(for_beta)
-}
-
-for_beta_quant <- function(mu, var_vec, y, X) {
-  ## score test for var_vec test used to fit beta test
-  ## inputs:
-  # fitted mu
-  # original y
-  # covariates X
-  # adapted from SAIGE package
-  V = rep(1 / var_vec[1], length(y))
-  res = as.vector(y - mu)
-  XV = t(X * V)
-  XVX = t(X) %*% (t(XV))
-  XVX_inv = Matrix::solve(XVX)
-  XXVX_inv = X %*% XVX_inv
-  XVX_inv_XV = XXVX_inv * V
-  S_a = colSums(X * res)
-  for_beta = list(XV = XV, XVX = XVX, XXVX_inv = XXVX_inv, XVX_inv = XVX_inv, S_a = S_a, XVX_inv_XV = XVX_inv_XV, V = V)
-  return(for_beta)
-}
-
-fit_vars <- function(Y_vec, X_mat, grm, w_vec, var_vec, sigmai_Y, sigmai_X, cov_var, tol, quant = FALSE, verbose, write_log) {
-  ## fitting process for tau and phi
-  # adapted from SAIGE package
+fit_vars <- function(Y_vec, X_mat, grm, w_vec, var_vec, sigmai_Y, sigmai_X, cov_var, tol, quant = FALSE) {
+  # Fitting process for tau and phi
+  # Adapted from fitglmmaiRPCG_q + fitglmmaiRPCG from SAIGE package
   if (!quant) {
-    re.AI = get_AI_score(Y_vec, X_mat, grm, w_vec, var_vec, sigmai_Y, sigmai_X, cov_var) 
-    score1 = re.AI$score1 
-    AI1 = re.AI$AI
-    Dtau = score1 / AI1
+    re.AI = get_AI_score(Y_vec, X_mat, grm, w_vec, var_vec, sigmai_Y, sigmai_X, cov_var)
+    Dtau = re.AI$score1 / re.AI$AI
     var_vec0 = var_vec
     var_vec[2] = var_vec0[2] + Dtau # update tau
     step = 1.0
@@ -211,15 +197,11 @@ fit_vars <- function(Y_vec, X_mat, grm, w_vec, var_vec, sigmai_Y, sigmai_X, cov_
     }
   } else {
     re.AI = get_AI_score_quant(Y_vec, X_mat, grm, w_vec, var_vec, sigmai_Y, sigmai_X, cov_var)
-    YPAPY = re.AI$YPAPY
-    YPwPY = re.AI$YPwPY
-    trace_PW = re.AI$trace_PW
-    trace_P_grm = re.AI$trace_P_grm
-    Dtau = Matrix::solve(re.AI$AI, re.AI$score_vector)
+    Dtau = Matrix::solve(re.AI$AI, re.AI$score_vector) #=-
     var_vec0 = var_vec
     var_vec = var_vec0 + Dtau
     step = 1.0
-    while (any(var_vec < 0)) { #if var_vec is less than zero step through
+    while (any(var_vec < 0)) { # if var_vec is less than zero step through
       step = step * 0.5
       var_vec = var_vec0 + step * Dtau
     }
@@ -227,55 +209,138 @@ fit_vars <- function(Y_vec, X_mat, grm, w_vec, var_vec, sigmai_Y, sigmai_X, cov_
 
   if (var_vec[1] < tol) {
     print("Warning! The first variance component parameter estimate is set at the tolarance")
-    var_vec[1] = tol*10
+    var_vec[1] = tol * 10
   }
   if (var_vec[2] < tol) {
     var_vec[2] = 0
   }
-  
   return(list("var_vec" = var_vec))
 }
 
-get_alpha <- function(y, X, var_vec, grm, family, alpha0, eta0, offset, verbose = FALSE, maxiter, tol.coef = tol, write_log = FALSE) {
-  # adapted from SAIGE package
-  mu <- family$linkinv(eta0)
-  mu_eta <- family$mu.eta(eta0)
-  Y <- eta0 - offset + (y - mu) / mu_eta
 
-  sqrt_W <- mu_eta / sqrt(family$variance(mu))
+simulate_tau_inner <- function(glm.fit0, grm, species_id = "s_id", tau0, phi0) {
+  family_to_fit = glm.fit0$family
+  data_new = glm.fit0$data
+  formulate_to_fit = glm.fit0$formula
 
-  W <- sqrt_W^2
-  for (i in 1:maxiter) {
-    alpha.obj <- get_coef_inner(Y, X, W, var_vec, grm)
+  data_new_shuffled = data_new[sample(nrow(data_new)), ]
+  data_new_shuffled$sample_name = rownames(grm)
+  
+  refit0 = glm(formulate_to_fit, data = data_new_shuffled, family = family_to_fit)
 
-    alpha <- as.matrix(alpha.obj$alpha)
-    eta <- as.matrix(alpha.obj$eta + offset)
-
-    if (verbose) {
-      cat("\n Phi and Tau:\n")
-      cat(var_vec)
-      cat("\n Fixed-effect coefficients:\n")
-      cat(alpha)
+  fit.glmm <- tryCatch(
+    fit_tau_test(
+      refit0, grm,
+      tau0 = tau0, phi0 = phi0,
+      verbose = FALSE,
+      species_id = species_id,
+      log_file = NA
+    ),
+    error = function(e) {
+      message("Error in fitting GLMM: ", e$message)
+      return(NULL)
     }
-    if (write_log) {
-      put(paste(" Tau:", var_vec, " Fixed-effect coefficients:", alpha), console = FALSE)
-    }
-    mu <- family$linkinv(eta)
-    mu_eta <- family$mu.eta(eta)
+  )
 
-    Y <- eta - offset + (y - mu) / mu_eta
-    sqrt_W <- mu_eta / sqrt(family$variance(mu))
-    W <- sqrt_W^2
-
-    if (max(abs(alpha - alpha0) / (abs(alpha) + abs(alpha0) + tol.coef)) < tol.coef) {
-      break
-    }
-    alpha0 <- alpha
+  # Initialize default results
+  tau = 0
+  t = 0
+  phi = 0
+  if (length(fit.glmm$t) > 0) {
+    t = sum(fit.glmm$b^2, na.rm = TRUE) / length(fit.glmm$sample_names)
+    tau = fit.glmm$var_vec[2]
+    phi = fit.glmm$var_vec[1]
+  } else {
+    message("GLMM fitting failed or produced no results.")
   }
 
-  alpha_result <- list(Y = Y, alpha = alpha, eta = eta, W = W, cov_var = alpha.obj$cov_var, sqrt_W = sqrt_W, sigmai_Y = alpha.obj$sigmai_Y, sigmai_X = alpha.obj$sigmai_X, mu = mu, eta_2 = alpha.obj$eta_2, b = alpha.obj$b)
-  return(alpha_result)
+  return(data.frame("tau" = tau, "t" = t, "phi" = phi))
 }
+
+
+for_beta <- function(mu, mu2, y, X) {
+  ## score test for var_vec test used to fit beta test
+  ## inputs: fitted mu, original y, covariates X
+  # Adapted from ScoreTest_NULL_Model_binary from SAIGE package
+  V = as.vector(mu2)
+  res = as.vector(y - mu)
+  
+  XV = t(X * V)
+  XVX = t(X) %*% (t(XV))
+  XVX_inv = Matrix::solve(XVX)
+  
+  XXVX_inv = X %*% XVX_inv
+  XVX_inv_XV = XXVX_inv * V
+  
+  S_a = colSums(X * res)
+  for_beta = list("XV" = XV, "XVX" = XVX, "XXVX_inv" = XXVX_inv, "XVX_inv" = XVX_inv, "S_a" = S_a, "XVX_inv_XV" = XVX_inv_XV, "V" = V)
+  return(for_beta)
+}
+
+
+fit_beta_one_gene <- function(glmm_fit, glm_fit0, grm, one_gene_df, SPA) {
+  # Function: fit_beta_one_gene
+  # Args:
+  # - glmm_fit: Output from the fit_tau_test function
+  # - glm_fit0: Output from the glm model for data in the same order
+  # - grm: Genetic relatedness matrix
+  # - one_gene_df: The presence or absence for ONE gene in a long format
+  #            Must have columns for sample_name, gene_id, and gene_value!
+  # - SPA: Whether to run saddle point approximation for p-values (mostly for binomial case)
+  # Returns:
+  # - List of values for each gene examined
+  # Adapted from SAIGE package
+
+  check_grm(grm, glm_fit0, verbose = TRUE)
+  check_beta(glmm_fit, glm_fit0, grm, one_gene_df, SPA)
+  
+  forbeta.obj = glmm_fit$forbeta.obj
+  family = glm_fit0$family
+  eta = glmm_fit$linear_predictors
+  mu = glmm_fit$fitted_values
+  mu_eta = family$mu.eta(eta)
+  sqrt_W = mu_eta / sqrt(glm_fit0$family$variance(mu))
+  W1 = sqrt_W^2 
+
+  G0 = as.vector(one_gene_df[, 2])
+  G_tilde = G0 - glmm_fit$forbeta.obj$XXVX_inv %*% (glmm_fit$forbeta.obj$XV %*% G0) # G1 is X adjusted
+  Y = eta + (glmm_fit$y - mu) / mu_eta
+  t_score = t(G_tilde) %*% (glmm_fit$y - mu)
+  m1 = sum(mu * G_tilde)
+  var1 = sum(W1 * G_tilde^2)
+  t_adj_2 = (t_score^2) / var1
+  beta = t_score / var1
+  pval = (pchisq(t_adj_2, lower.tail = FALSE, df = 1, log.p = FALSE))
+  z = (qnorm(pval / 2, log.p = F, lower.tail = F))
+  se_beta = abs(beta) / sqrt(abs(z))
+  qtilde = t_score + m1
+
+  # Generate the result data frame
+  ret_basic = data.frame(
+        "gene_id" = colnames(one_gene_df)[2], 
+        "tau" = as.numeric(glmm_fit$var_vec[2]), 
+        "cor_to_y" = cor(G0, glmm_fit$y), 
+        "cor_to_b" = cor(as.numeric(glmm_fit$b), G0), 
+        "z" = z, 
+        "var1" = var1)
+  
+  if (SPA) {
+    if (var1 < 0) {
+      ret = cbind(ret_basic, data.frame("beta" = NA, "se_beta" = NA, "t_adj" = NA, "SPA_pvalue" = NA, 
+                                      "spa_score" = NA, "SPA_zvalue" = NA, "pvalue_noadj" = NA, "converged" = NA))
+    } else {
+      out1 = saddle_prob(q = qtilde, mu = mu, g = G_tilde, var1, cutoff = 2, log.p = FALSE)
+      ret = cbind(ret_basic, data.frame("beta" = beta, "se_beta" = se_beta, "t_adj" = t_adj_2, "SPA_pvalue" = out1$p.value, 
+                  "spa_score" = out1$score, "SPA_zvalue" = out1$z_value, "pvalue_noadj" = out1$pvalue_noadj, "converged" = out1$converged))
+    }
+  } else {
+    # no SPA
+    ret = cbind(ret_basic, data.frame("beta" = beta, "se_beta" = se_beta, "t_adj" = t_adj_2, "SPA_pvalue" = NA, 
+                  "spa_score" = NA, "SPA_zvalue" = NA, "pvalue_noadj" = pval,  "converged" = NA)) #<-- DOUBLE CHECK converged
+  }
+  return(ret)
+}
+
 
 #' fit_tau_test
 #'
@@ -288,39 +353,42 @@ get_alpha <- function(y, X, var_vec, grm, family, alpha0, eta0, offset, verbose 
 #' @param phi0 inital phi estimate (variance on means of outputs will be 1 for logit or binonimal dispersion)
 #' @param maxiter maximum iterations to fit the glmm model
 #' @param verbose whether outputting messages in the process of model fitting
+#' @param tol tolence for variance estimation
 #' @param log_file log file to write to
+#' @param debug print more details if debug. (Developer only)
 #' @return model output for the tau test on population structure 
+#' @importFrom logr log_open log_print log_close
 #' @export
-fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter = 100, verbose = TRUE, tol = .0001, log_file = NA) {
+fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0 = 1, maxiter = 100, verbose = TRUE, tol = 0.0001, log_file = NA, debug= FALSE) {
   # Fits the null generalized linear mixed model for a binary trait
-  # adapted from SAIGE package
+  # Adapted from glmmkin.ai_PCG_Rcpp_Binary from SAIGE package
   # Args:
   #  glm.fit0: glm model. Logistic model output (with no sample relatedness accounted for)
   #  grm: Genetic Relatedness Matrix  in the same sample order as glm.fit0!
   #  species_id: Species ID of the species for record
   #  tau0: initial values for the variance component parameter tau
-  #  phi0: initial values for the variance component parameter phi (only for quant)
+  #  phi0: initial values for the variance component parameter phi (only for quantitative)
   #  maxiter: maximum iterations to fit the glmm model
   #  verbose: whether outputting messages in the process of model fitting
-  #  tol: tolance for varaince estimates
+  #  tol: tolerance for variance estimates
   #  log_file: whether to write to a log file and what that would be
   # Returns:
   #  model object pop.struct.glmm
-  write_log = !is.na(log_file) & log_file != FALSE
-  t_begin = proc.time()
-  if (verbose) {
-    cat("begining time ")
-    cat(t_begin)
-  }
-  if (write_log) {
-    put("begining time ", console = FALSE)
-    put(t_begin, console = FALSE)
-  }
-  check_inputs_tau(glm.fit0, grm, species_id, tau0, phi0, maxiter, tol, verbose, write_log, log_file)
+
+  log_file = ifelse(is.na(log_file), file.path(tempdir(), "microSLAM.log"), log_file)
+  
+  log_open(log_file, logdir = F, show_notes = F)
+  log_print("====fit_tau_test::start::====", console = verbose)
+  log_print(paste("====Fixed-effect coefficients:"), console = verbose)
+  log_print(glm.fit0, console = verbose)
+  
+  check_inputs_tau(glm.fit0, grm, species_id, tau0, phi0, maxiter, tol, verbose, log_file)
+
   y = glm.fit0$y
   n = length(y)
   X = model.matrix(glm.fit0)
   Xorig = model.matrix(glm.fit0)
+
   offset = glm.fit0$offset
   if (is.null(offset)) {
     offset = rep(0, n)
@@ -333,6 +401,7 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
   Y = eta - offset + (y - mu) / mu_eta
   alpha0 = glm.fit0$coef
   eta0 = eta
+
   sample_ids = colnames(grm)
   
   ### check for quantitiative or not from glm obj
@@ -342,20 +411,19 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
   } else {
     quant = TRUE
   }
-
-  if (verbose) cat(" Fixed-effect coefficients: \n", names(glm.fit0$coefficients), "\n", glm.fit0$coefficients)
-  if (write_log) put(paste(" Fixed-effect coefficients: ", glm.fit0$coef), console = FALSE)
-  if (verbose) cat(" inital tau is ", tau0, "\n")
-  if (write_log) put(paste(" inital tau is ", tau0), console = FALSE)
-  
+ 
   var_vec0 = c(phi0, tau0) ## var_vec is a vector of phi and tau for the variance estimates for tau test
   if (var_vec0[1] <= 0) {
     stop("\nERROR! The first variance component parameter estimate is 0\n")
   }
-  alpha.obj = get_alpha(y, X, var_vec0, grm, family, alpha0, eta0, offset, maxiter = maxiter, verbose = verbose, tol.coef = tol, write_log = write_log)
+
   var_vec=var_vec0
+  log_print(paste("====fit_tau_test::initial tau phi:: ", paste(round(var_vec, 4), collapse = ", "), sep = ""), console = verbose)
+  
+  ## Fixed-effect coefficients => alpha.obj$alpha
+  alpha.obj = get_alpha(y, X, var_vec0, grm, family, alpha0, eta0, offset, maxiter = maxiter, tol.coef = tol)
  
-  ### update var differently if quantitative 
+  ### Initial Update of variance components phi and tau 
   if (quant) {
     re = get_AI_score_quant(alpha.obj$Y, X, grm, alpha.obj$W, var_vec0, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var)
     var_vec[2] = max(0, as.numeric(var_vec0[2] + var_vec0[2]^2 * (re$YPAPY - re$trace_P_grm) / n))
@@ -364,144 +432,122 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
     re = get_AI_score(alpha.obj$Y, X, grm, alpha.obj$W, var_vec0, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var)
     var_vec[2] = max(0, as.numeric(var_vec0[2] + var_vec0[2]^2 * ((re$YPAPY - re$trace_P_grm)) / n)) # first fit vars
   }
+  if (debug) {
+    log_print(paste("====get_AI_score::var_vec::", paste(round(var_vec, 4), collapse = ", ")), console = verbose)
+  }
 
+  t_begin_fit_tau = proc.time()
+  tol_limt = FALSE
+  list_of_log_messages <- list()
   for (i in seq_len(maxiter)) {
-    if (verbose) cat(paste("\ni", i))
-    if (verbose) cat("\nIteration ", i, "tau is ", var_vec[2], "\n")
-    if (write_log) put(paste(" Iteration ", i, "tau is: ", var_vec[2]), console = FALSE)
-    tol_limt = FALSE
     alpha0 = alpha.obj$alpha
     var_vec0 = var_vec
     eta0 = eta
     rss_0 = sum((y - mu)^2)
-    t_begin_alpha = proc.time()
-    alpha.obj = get_alpha(y, X, var_vec, grm, family, alpha0, eta0, offset, verbose = verbose, maxiter = maxiter, tol.coef = tol, write_log = write_log)
-    t_end_get_alpha = proc.time()
-    if (verbose) {
-      cat("\ntime to get alpha\n")
-      cat(t_end_get_alpha - t_begin_alpha)
-    }
-    if (write_log) {
-      put("time to get alpha", console = FALSE)
-      put(t_end_get_alpha - t_begin_alpha, console = FALSE)
-    }
-
-    ## update tau and phi
-    fit.obj = fit_vars(alpha.obj$Y, X, grm, alpha.obj$W, var_vec, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var, tol = tol, verbose = verbose, write_log = write_log, quant = quant)
-    t_end_fit_tau = proc.time()
-    if (verbose) {
-      cat("\ntime to fit tau\n")
-      cat(t_end_fit_tau - t_end_get_alpha)
-    }
-    if (write_log) {
-      put("time to fit tau", console = FALSE)
-      put(t_end_fit_tau - t_end_get_alpha, console = FALSE)
-    }
-
+    
+    ## get alpha
+    alpha.obj = get_alpha(y, X, var_vec, grm, family, alpha0, eta0, offset, maxiter = maxiter, tol.coef = tol)
+    ## fit tau and phi
+    fit.obj = fit_vars(alpha.obj$Y, X, grm, alpha.obj$W, var_vec, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var, tol = tol, quant = quant)
+    
     ## update all params
-    tau = as.numeric(fit.obj$var_vec[2])
     var_vec = as.numeric(fit.obj$var_vec)
+    tau = as.numeric(fit.obj$var_vec[2])
     cov_var = alpha.obj$cov_var
     alpha = alpha.obj$alpha
     eta = alpha.obj$eta
     Y = alpha.obj$Y
     mu = alpha.obj$mu
     res = y - mu
-    if (verbose) {
-      cat(paste("\nchange in tau", abs(tau - tau0) / (abs(tau) + abs(tau0) + tol)))
-      cat("\ntau: ", tau, "\n")
-    }
-    if (write_log) {
-      put(paste("change in tau", abs(tau - tau0) / (abs(tau) + abs(tau0) + tol)), console = FALSE)
-      put(paste("tau: ", tau), console = FALSE)
-    }
-    #if(sum(res^2)/n < tol) break
+
+    list_of_log_messages[[i]] = paste("  ===fit_vars::iteration ", i, "::var_vec ", paste(round(var_vec, 4), collapse = ", "), sep = "")
+    
     if (var_vec[1] <= 0) {
       stop("\nERROR! The first variance component parameter estimate is 0\n")
     }
-    
     if (var_vec[2] == 0) break
+
     var_condition = max(abs(var_vec - var_vec0) / (abs(var_vec) + abs(var_vec0) + tol)) < tol 
     if (var_vec[1] <= tol*10 & var_vec0[1] <= tol*10) {
-      tol_limt=TRUE
+      tol_limt = TRUE
       print("Warning! The first variance component parameter estimate is set at the tolarance breaking iterations")
       break
-    }
-    rss = sum(res^2)
-    rss_condition = rss_0 - rss
-    if (verbose) {
-      cat(paste("\nres", rss))
-      cat(paste("\nrss change", rss_condition))
-    }
-    if (write_log) {
-      put(paste("res", rss), console = FALSE)
-      put(paste("rss change", rss_condition), console = FALSE)
     }
 
     if (var_condition) break
     if (max(var_vec) > tol^(-2)) {
       tol_limt = TRUE
       i = maxiter
+      print("Warning! max(var_vec) > tol^(-2)")
       break
     }
   }
-  if (verbose) cat("\niter break at ", i)
-  if (verbose) cat("\nFinal ", var_vec, ":\n")
-  if (write_log) put(paste("iter break at ", i), console = FALSE)
-  if (write_log) put(paste("Final ", var_vec, ":"), console = FALSE)
+  t_end_fit_tau = proc.time()
+  
+  if(debug) {
+    for (msg in list_of_log_messages) {
+      log_print(msg, console = verbose)
+    }
+  }
+  
   if (max(var_vec) > tol^(-2) | i == maxiter) {
-    cat("Model not converged")
-    if (write_log) {
-      put("Model not converged", console = FALSE)
-    }
+    log_print("Model not converged", console = verbose)
   }
-  alpha.obj = get_alpha(y, X, var_vec, grm, family, alpha, eta, offset, verbose = verbose, maxiter = maxiter, tol.coef = tol, write_log = write_log)
-  if (quant) {
-    if(tol_limt){
-      fit.final = get_AI_score_quant(alpha.obj$Y, X, grm, alpha.obj$W, var_vec, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var)
-      var_vec[2] = max(0, var_vec0[2] + var_vec0[2]^2 * (fit.final$YPAPY - fit.final$trace_P_grm) / n)
-      var_vec[1] = max(tol*10, var_vec0[1] + var_vec0[1]^2 * (fit.final$YPwPY - fit.final$trace_PW) / n)
-      i = maxiter
-      
-    }else{
-      fit.final = get_AI_score_quant(alpha.obj$Y, X, grm, alpha.obj$W, var_vec, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var)
-      var_vec[2] = max(0, var_vec0[2] + var_vec0[2]^2 * (fit.final$YPAPY - fit.final$trace_P_grm) / n)
-      var_vec[1] = max(tol*10, var_vec0[1] + var_vec0[1]^2 * (fit.final$YPwPY - fit.final$trace_PW) / n)
-    }
-    
-  } else {
-    fit.final = get_AI_score(alpha.obj$Y, X, grm, alpha.obj$W, var_vec, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var)
-    var_vec[2] = max(0, as.numeric(var_vec0[2] + var_vec0[2]^2 * ((fit.final$YPAPY - fit.final$trace_P_grm)) / n)) # tau + Dtau 
-  }
-  names(var_vec) = c("phi", "tau")
+  
+  alpha.obj = get_alpha(y, X, var_vec, grm, family, alpha, eta, offset, maxiter = maxiter, tol.coef = tol)
+  
   cov_var = alpha.obj$cov_var
   alpha = alpha.obj$alpha
   names(alpha) = names(glm.fit0$coefficients)
   eta = alpha.obj$eta
   Y = alpha.obj$Y
   mu = alpha.obj$mu
-  mu_eta = family$mu.eta(eta)
-  sqrt_W = mu_eta / sqrt(family$variance(mu))
-  W = sqrt_W^2
-  sigma = gen_sigma(W, var_vec, grm)
+
+  fit.final = fit_vars(alpha.obj$Y, X, grm, alpha.obj$W, var_vec, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var, tol = tol, quant = quant)
+  var_vec = as.numeric(fit.final$var_vec)
+  names(var_vec) = c("phi", "tau")
+
+  if (FALSE) {
+    # This was the same with the initialization step. But, we should update the tau and phi just like the for loop.
+    if (quant) {
+      if(tol_limt){
+        fit.final = get_AI_score_quant(alpha.obj$Y, X, grm, alpha.obj$W, var_vec, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var)
+        var_vec[2] = max(0, var_vec0[2] + var_vec0[2]^2 * (fit.final$YPAPY - fit.final$trace_P_grm) / n)
+        var_vec[1] = max(tol*10, var_vec0[1] + var_vec0[1]^2 * (fit.final$YPwPY - fit.final$trace_PW) / n)
+        i = maxiter
+      } else {
+        fit.final = get_AI_score_quant(alpha.obj$Y, X, grm, alpha.obj$W, var_vec, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var)
+        var_vec[2] = max(0, var_vec0[2] + var_vec0[2]^2 * (fit.final$YPAPY - fit.final$trace_P_grm) / n)
+        var_vec[1] = max(tol*10, var_vec0[1] + var_vec0[1]^2 * (fit.final$YPwPY - fit.final$trace_PW) / n)
+      }
+      
+    } else {
+      fit.final = get_AI_score(alpha.obj$Y, X, grm, alpha.obj$W, var_vec, alpha.obj$sigmai_Y, alpha.obj$sigmai_X, alpha.obj$cov_var)
+      var_vec[2] = max(0, as.numeric(var_vec0[2] + var_vec0[2]^2 * ((fit.final$YPAPY - fit.final$trace_P_grm)) / n)) # tau + Dtau 
+    }
+  }
+  
+  if (quant) {
+    mu2 = rep(1 / var_vec[1], length(y))
+  } else {
+    mu2 = mu * (1 - mu)
+  }
+  forbeta.obj = for_beta(mu, mu2, y, Xorig)
+  
+  log_print(paste("====fit_tau_test::final tau phi::", paste(round(var_vec, 4), collapse = ", ")), console = verbose)
+  log_print(paste("====fit_tau_test elapsed time:"), console = verbose)
+  log_print(t_end_fit_tau - t_begin_fit_tau, console = verbose)
+  
   converged = ifelse(i < maxiter, TRUE, FALSE)
   res = y - mu
   rss = sum(res^2)
-  if (quant) {
-    mu2 = rep(1 / var_vec[1], length(y))
-    forbeta.obj = for_beta_quant(mu, var_vec, y, Xorig)
-  } else {
-    mu2 = mu * (1 - mu)
-    forbeta.obj = for_beta_bin(mu, y, Xorig)
-  }
-
+  
+  # https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/j.2041-210x.2012.00261.x
   ss = sum((y - mean(y))^2)
   var_fixed = var(Xorig %*% alpha)
   var_random = var(as.vector(alpha.obj$b))
   var_error = var(res)
-  # https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/j.2041-210x.2012.00261.x
 
-  Coefficients = paste("Coefficents:", alpha)
   if (!quant) {
     model_metrics = list(
       "S" = sd(res),
@@ -520,164 +566,56 @@ fit_tau_test <- function(glm.fit0, grm, species_id, tau0 = 1, phi0= 1, maxiter =
   }
 
   glmm_result = list(
-    tau = var_vec[2],
-    var_vec = var_vec,
-    coefficients = alpha, b = alpha.obj$b, 
-    t = sum(alpha.obj$b^2)/length(sample_ids),
-    linear_predictors = eta, linear_model = Xorig %*% alpha + alpha.obj$b,
-    fitted_values = mu, var_mu = mu2, Y = Y, residuals = res,
-    cov_var = cov_var, converged = converged,
-    sample_names = sample_ids,
-    forbeta.obj = forbeta.obj,
-    y = y, X = Xorig,
-    trait_type = glm.fit0$family,
-    formula = paste0(glm.fit0$formula, " + b"),
-    iter_finised = i,
-    model_metrics = model_metrics, species_id = species_id, grm = grm
+    "tau" = var_vec[2],
+    "var_vec" = var_vec,
+    "coefficients" = alpha, 
+    "b" = alpha.obj$b, 
+    "t" = sum(alpha.obj$b^2)/length(sample_ids),
+    "linear_predictors" = eta, 
+    "linear_model" = Xorig %*% alpha + alpha.obj$b,
+    "fitted_values" = mu, 
+    "var_mu" = mu2, 
+    "Y" = Y, 
+    "residuals" = res,
+    "cov_var" = cov_var, 
+    "converged" = converged,
+    "sample_names" = sample_ids,
+    "forbeta.obj" = forbeta.obj,
+    "y" = y, 
+    "X" = Xorig,
+    "trait_type" = glm.fit0$family,
+    "formula" = paste0(glm.fit0$formula, " + b"),
+    "iter_finised" = i,
+    "model_metrics" = model_metrics, 
+    "species_id" = species_id #,#grm = grm #<- we dont' need to carry GRM around
   )
   class(glmm_result) = "pop.struct.glmm"
-  t_end = proc.time()
-  if (verbose) {
-    cat("\nfitting the structure model took\n")
-    cat(t_end - t_begin)
-    cat("\n")
-  }
-  if (write_log) {
-    put("fitting the structure model took", console = FALSE)
-    put(t_end - t_begin, console = FALSE)
-  }
+  log_print("====fit_tau_test::end::====", console = verbose)
+  log_close()
   return(glmm_result)
 }
 
-check_grm <- function(grm,glm.fit0,verbose){
-  ### function to check grm and glm.fit0 that they are the expected inputs
-  # grm, NxN matrix
-  # glm.fit0, output from glm, baseline glm
-  if(!is.matrix(grm)){
-    stop("grm is expected to be a matrix")
-  }
-  if(!is.numeric(grm) |  any(is.na(grm))){
-    stop("grm is expected to have all numeric values")
-  }
-  if(nrow(grm) != ncol(grm)){
-    stop("grm is expected to be a NxN matrix, with N as the number of samples")
-  }
-  if(!all(colnames(grm) == rownames(grm))){
-    warning("column names do not match row names, grm should be a sample by sample matrix")
-  }
-  if(class(glm.fit0)[1] != "glm"){
-    stop("Expected a glm object for glm.fit0, Example: glm_fit0=glm(`y ~ age  + 1`, data = exp_metadata, family = `binomial`)")
-  }
-  if(nrow(glm.fit0$data) != nrow(grm)){
-    stop("number of samples from baseline glm does not match number of samples from grm, these must match")
-  }
-  if ("sample_name" %in% colnames(glm.fit0$data)) {
-    if (verbose) {
-      cat("\nchecking sample names of grm and glm fit match\n")
-    }
-    if (!all(glm.fit0$data$sample_name == rownames(grm))) {
-      stop("\nERROR! the sample names for glm and grm do not match")
-    } else {
-      if (verbose) {
-        cat("check complete")
-      }
-    }
-  } else {
-    warning("not running check on sample names ensure grm sample order and glm fit sample order match! Will only check if data from glm has column named sample_name")
-  }
-  
+
+#' run_tau_test
+#'
+#' take output from population structure test and test how significant the tau is for that set of data
+#'
+#' @param glm.fit0 glm model. Model output with no sample relatedness accounted for
+#' @param grm Genetic Relatedness Matrix (from scripts or user) NxN matrix of sample relatedness
+#' @param n_tau number of tau to simulate
+#' @param species_id species id for bacterial species
+#' @param tau0 starting tau
+#' @param phi0 starting phi
+#' @param seed random seed
+#' @return data frame of values of T for tau for different permutations of the covarites matrix
+#' @export
+run_tau_test <- function(glm.fit0, grm, n_tau, species_id, tau0, phi0, seed=100) {
+  set.seed(seed)
+  list_of_tau = lapply(seq(1, n_tau), function(x) simulate_tau_inner(glm.fit0, grm, species_id = species_id, tau0, phi0))
+  df_of_tau = do.call(rbind, list_of_tau)
+  return(df_of_tau)
 }
 
-check_inputs_tau <- function(glm.fit0,grm,species_id,tau0,phi0,maxiter,tol,verbose,write_log,log_file){
-  ## check inputs are as expected for tau test
-  # glm.fit0 baseline glm from glm function
-  # grm output from create_grm or NxN matrix
-  # species_id id to denote species
-  # tau0 numeric > 0 
-  # phi0 numeric > 0 
-  # maxiter maximum iterations
-  # tol tolarnce for fitting usually <1
-  # verbose whether to write updates as fitting occurs
-  # write_log whether to write log file
-  # log_file location to write log file
-  if(!is.logical(verbose)){
-    stop("verbose should be a logical")
-  }
-  if(write_log){
-    if(!file_test("-x",log_file)){
-      warning("log file is not writing to a file, check path, running without log file")
-      write_log = FALSE
-    }
-  }
-  if(!is.numeric(tol)){
-    stop("tolarance should be numeric")
-  }
-  if(tol>.01){
-    warning("tolarance is usually smaller than .01")
-  }
-  if(!is.numeric(maxiter)){
-    stop("maxiter should be numeric")
-  }
-  if(maxiter<3){
-    warning("maxiter is usually larger than 3")
-  }
-  if(maxiter>100){
-    warning("large maxiter, might take a long time to converge")
-  }
-  if(!is.numeric(tau0)){
-    stop("tau0 must be numeric")
-  }
-  if(!is.numeric(phi0)){
-    stop("phi0 must be numeric")
-  }
-  if(tau0 <= 0 | phi0 <= 0){
-    stop("tau0 and phi0 must be a postive number")
-  }
-  check_grm(grm,glm.fit0,verbose)
-  
-}
-
-check_beta <- function(pop.struct.glmm,
-                       glm.fit0, grm,
-                       gene_df, SPA = FALSE){
-  ## check inputs for beta test for expected input
-  # pop.struct.glmm output from tau test
-  # glm.fit0 baseline glm from glm function
-  # grm output from create_grm or NxN matrix
-  # gene_df dataframe of gene_id, sample_name, and gene_value
-  if(!is.logical(SPA)){
-    stop("SPA should be a logical")
-  }
-  if(!(class(pop.struct.glmm)=="pop.struct.glmm")){
-    stop("pop.struct.glmm should be an output of fit_tau_test")
-  }
-  if(all(pop.struct.glmm$y != glm.fit0$y)){
-    warning("y for pop.struct.glmm does not match y for glm.fit0, if this is not intentional double check data.")
-  }
-  if(!is.data.frame(gene_df)){
-    stop("gene_df is expected to be a data frame")
-  }
-  if(!any("gene_id" == colnames(gene_df))){
-    stop("Expected column named gene_id, please use a gene_df with a column named gene_id")
-  }
-  
-  if(!any("sample_name" == colnames(gene_df))){
-    stop("Expected column named sample_name, please use a gene_df with a column named sample_name with sample names")
-  }
-  if(!any("gene_value" == colnames(gene_df))){
-    stop("Expected column named gene_value, please use a gene_df with a column named gene_value with gene value")
-  }
-  sample_genes = unique(gene_df$gene_id)
-  one_gene =  gene_df[which(gene_df$gene_id == sample_genes[1]),]
-  if(!all(one_gene$sample_name == pop.struct.glmm$sample_names)){
-    warning("sample names for gene_df do not match sample names for  pop.struct.glmm, if this is not intentional double check data for order of samples and number of samples.")
-  }
-  
-  if(ncol(gene_df)>3){
-    warning("expected stacked data frame of 3 columns, gene_id, sample_name, gene_value, data frame has more than 3 columns, check that data frame is stacked.")
-  }
-  
-}
 
 #' fit_beta
 #'
@@ -686,40 +624,41 @@ check_beta <- function(pop.struct.glmm,
 #' @param pop.struct.glmm output of fit_tau_test; GLMM of species with grm accounted for
 #' @param glm.fit0 glm model. Model output with no sample relatedness accounted for
 #' @param grm Genetic Relatedness Matrix (from calculate_grm or user) NxN matrix of sample relatedness
-#' @param gene_df long data frame with, gene_id, sample_name, and gene_value
+#' @param sample_by_gene_df sample-by-gene data frame with sample_name, and list_of_genes
 #' @param SPA whether to run Saddle point approximation for pvalues (will slow down output)
 #' @return dataframe of beta estimates for all genes tested
+#' @importFrom stats cor glm model.matrix pchisq pnorm qnorm sd var
+#' @importFrom dplyr arrange bind_rows all_of
 #' @export
-fit_beta <- function(pop.struct.glmm,
-                     glm.fit0, grm,
-                     gene_df, SPA = FALSE) {
+fit_beta <- function(pop.struct.glmm, glm.fit0, grm, sample_by_gene_df, SPA = FALSE) {
   # Args:
   # pop.struct.glmm: output from fit_tau_test
   # glm.fit0: output from glm model for data in same order
   # grm: genetic relatedness matrix
-  # gene_df: the presance or absence for each gene in a long format 
-  # gene_df must have column for sample; column for gene_id; column for gene_value
+  # sample_by_gene_df: the presance or absence for each gene in a long format 
+  # sample_by_gene_df must have column for sample; column for gene_id; column for gene_value
   # SPA: whether to run saddle point approximation for pvalues (mostly for binomial case)
   # Returns:
   # list of values for each gene examined
-  # adapted from SAIGE package
+  # Adapted from SAIGE package
+  
+  list_of_samples_from_glmm = pop.struct.glmm$sample_names
+  stopifnot(all.equal(rownames(grm), list_of_samples_from_glmm))
+  
+  sample_by_gene_df <- sample_by_gene_df %>% as.data.frame() 
+  rownames(sample_by_gene_df) <- sample_by_gene_df$sample_name
+  
+  sample_by_gene_df <- sample_by_gene_df %>% 
+    mutate(sample_name = factor(sample_name, levels = list_of_samples_from_glmm)) %>%
+    arrange(sample_name)
+  stopifnot(all.equal(rownames(sample_by_gene_df), as.vector(rownames(grm))))
+  
   t_begin = proc.time()
-  list_vec=NULL
-  check_grm(grm,glm.fit0,verbose = TRUE)
-  check_beta(pop.struct.glmm, glm.fit0, grm, gene_df, SPA)
-  forbeta.obj = pop.struct.glmm$forbeta.obj
-  family = glm.fit0$family
-
-  eta = pop.struct.glmm$linear_predictors
-  mu = pop.struct.glmm$fitted_values
-  mu_eta = family$mu.eta(eta)
-  sqrt_W = mu_eta / sqrt(glm.fit0$family$variance(mu))
-  W1 = sqrt_W^2 
-  sample_lookup = data.frame(sample_names = pop.struct.glmm$sample_names, index = seq(1, length(pop.struct.glmm$sample_names)), y = pop.struct.glmm$y)
-  sample_genes = unique(gene_df$gene_id)
-
-  for (k in sample_genes) {
-    iter = which(sample_genes == k)
+  iter = 1
+  list_of_genes <- setdiff(colnames(sample_by_gene_df), "sample_name")
+  list_of_rets <- list()
+  
+  for (my_gene in list_of_genes) {
     if (iter %% 1000 == 0) {
       cat(paste("number of genes done ", iter, "\n"))
       cat("time past:")
@@ -727,51 +666,186 @@ fit_beta <- function(pop.struct.glmm,
       cat(t_now - t_begin)
       cat("\n")
     }
-    one_gene = gene_df[which(gene_df$gene_id == k),] %>%
-      ungroup() 
-    rownames(one_gene) = one_gene$sample_name
-    one_gene = one_gene[sample_lookup$sample_names, ]
-    G0 = as.vector(one_gene$gene_value)
-    G_tilde = G0 - pop.struct.glmm$forbeta.obj$XXVX_inv %*% (pop.struct.glmm$forbeta.obj$XV %*% G0) # G1 is X adjusted
-    Y = eta + (pop.struct.glmm$y - mu) / mu_eta
-    t_score = t(G_tilde) %*% (pop.struct.glmm$y - mu)
-    m1 = sum(mu * G_tilde)
-    var1 = sum(W1 * G_tilde^2)
-    t_adj_2 = (t_score^2) / var1
-    beta = t_score / var1
-    pval = (pchisq(t_adj_2, lower.tail = FALSE, df = 1, log.p = FALSE))
-    z = (qnorm(pval / 2, log.p = F, lower.tail = F))
-    se_beta = abs(beta) / sqrt(abs(z))
-    qtilde = t_score + m1
-    if (SPA) {
-      if (var1 < 0) {
-        list_vec = rbind(list_vec, data.frame(
-          "species_id" = pop.struct.glmm$species_id, tau = as.numeric(pop.struct.glmm$var_vec[2]), "gene_id" = k, "cor" = cor(G0, pop.struct.glmm$y), "cor_to_b" = cor(as.numeric(pop.struct.glmm$b), G0), "z" = z, "var1" = var1, "beta" = NA, "se_beta" = NA, "pvalue" = NA,
-          "t_adj" = NA,
-          SPA_pvalue = NA, spa_score = NA, SPA_zvalue = NA, pvalue_noadj = NA, converged = FALSE
-        ))
-      } else {
-        out1 = saddle_prob(q = qtilde, mu = mu, g = G_tilde, var1, cutoff = 2, log.p = FALSE)
-        list_vec = rbind(list_vec, data.frame(
-          "species_id" = pop.struct.glmm$species_id, tau = as.numeric(pop.struct.glmm$var_vec[2]), "gene_id" = k, "cor" = cor(G0, pop.struct.glmm$y), "cor_to_b" = cor(as.numeric(pop.struct.glmm$b), G0), "z" = z, "var1" = var1, "beta" = beta, "se_beta" = se_beta,
-          "t_adj" = t_adj_2,
-          SPA_pvalue = out1$p.value, spa_score = out1$score, SPA_zvalue = out1$z_value, pvalue_noadj = out1$pvalue_noadj, converged = out1$converged
-        ))
-      }
-    } else {
-      # no SPA
-      list_vec = rbind(list_vec, data.frame(
-        "species_id" = pop.struct.glmm$species_id, tau = as.numeric(pop.struct.glmm$var_vec[2]), "gene_id" = k, "cor" = cor(G0, pop.struct.glmm$y), "cor_to_b" = cor(as.numeric(pop.struct.glmm$b), G0), "z" = z, "var1" = var1, "beta" = beta, "se_beta" = se_beta, "pvalue" = pval,
-        "t_adj" = t_adj_2
-      ))
-    }
+    one_gene_df <- sample_by_gene_df %>% select(sample_name, all_of(my_gene))
+    ret <- fit_beta_one_gene(pop.struct.glmm, glm.fit0, grm, one_gene_df, SPA=SPA)
+    list_of_rets[[my_gene]] <- ret
+    iter = iter + 1
   }
   cat("total time past:")
   t_end = proc.time()
   cat(t_end - t_begin)
   cat("\n")
-  return(list_vec)
+
+  genes_test_df <- bind_rows(list_of_rets)
+  return(genes_test_df)
+  
 }
+
+
+#' Run Beta test for all genes
+#'
+#' Runs a beta test on all genes using GLM and GLMM models.
+#'
+#' @param sample_by_gene_df A data frame with gene expression values per sample.
+#' @param glm_fit0 The null GLM model.
+#' @param glmm_fit The fitted GLMM model.
+#' @param GRM The genomic relationship matrix (GRM).
+#' @param genes_to_test A data frame of genes to test.
+#' @param do_spa Logical. If TRUE, use Saddlepoint Approximation (SPA).
+#' @return A data frame with beta test results.
+#' @export
+run_beta_test <- function(sample_by_gene_df, glm_fit0, glmm_fit, GRM, genes_to_test, do_spa=TRUE) {
+  
+  if (!all(colnames(GRM) == glmm_fit$sample_names)) {
+    stop("Error: Column names in GRM do not match sample names in glmm_fit.")
+  }
+  # Fit beta model
+  genes_test_df <- fit_beta(glmm_fit, glm_fit0, GRM, sample_by_gene_df, SPA=do_spa)
+  
+  if (do_spa) {
+    genes_test_df <- genes_test_df %>% 
+      arrange(SPA_pvalue) %>%
+      mutate(SPA_pvalue = ifelse(is.na(SPA_pvalue), 1, SPA_pvalue))
+  } else {
+    genes_test_df <- genes_test_df %>%
+      arrange(pvalue_noadj)
+  }
+  
+  genes_tested <- left_join(genes_to_test, genes_test_df, by=c("gene_id" = "gene_id"))
+  return(genes_tested)
+}
+
+
+#' Run microSLAM Analysis
+#'
+#' This function runs the microSLAM analysis pipeline, which includes:
+#' - Tau test for strain-level trait association, with permutation test for p value
+#' - Beta test for gene-level trait association.
+#'
+#' @param sample_by_gene_to_test A data frame with binary gene presence/absence.
+#' @param samples_to_test A metadata data frame for samples, with sample_name as first column.
+#' @param genes_to_test A metadata data frame for genes, with gene_id as first column.
+#' @param GRM_to_test A data frame for the genomic relationship matrix (GRM).
+#' @param species_id Character. Species identifier.
+#' @param outdir Character. Directory for saving output files.
+#' @param logdir Character. Directory for storing log files.
+#' @param formula_string Character. Model formula (default = `"y ~ age + 1"`).
+#' @param family Family in GLM (default = 'binomial')
+#' @param do_SPA Logical. Whether to run saddlepoint approximation (SPA) for p-value estimation (default: `FALSE`).
+#' @param verbose Logical (default = FALSE)
+#' @param debug Logical (default = FALSE) Only for developing debug purpose
+#' @param response_var Character. Name of the response variable (default = `"y"`).
+#' @param n_tau Integer. Number of tau permutations (default = `1000`).
+#'
+#' @return A fitted GLMM model (`glmm_fit`).
+#' @export
+#' @importFrom stats glm
+#' @importFrom dplyr mutate arrange left_join
+#' @importFrom utils write.table
+#' @importFrom Matrix Matrix
+#' @importFrom pROC auc
+#' @importFrom stats as.formula
+run_microslam <- function(sample_by_gene_to_test, samples_to_test, genes_to_test, 
+                          GRM_to_test, species_id, outdir, logdir, do_SPA = FALSE,
+                          formula_string = "y ~ age + 1", response_var = "y", 
+                          family = "binomial", verbose = FALSE, n_tau = 1000, debug=FALSE) {
+  
+  # Ensure output and log directories exist
+  if (!dir.exists(outdir)) dir.create(outdir, recursive = TRUE, showWarnings = F)
+  if (!dir.exists(logdir)) dir.create(logdir, recursive = TRUE, showWarnings = F)
+  
+  # Define log file path
+  log_file = file.path(logdir, paste0("fit_tau_test_", response_var, "_", species_id, ".log"))
+  
+  # Step 1.1: Fit null GLM model
+  glm_fit0 = glm(as.formula(formula_string), data = samples_to_test, family = family)
+  
+  # Step 1.2: Fit GLMM model
+  glmm_fit = fit_tau_test(glm_fit0, GRM_to_test, species_id, verbose = verbose, log_file = log_file, debug = debug)
+  
+  # Save GLM and GLMM models
+  saveRDS(glm_fit0, file.path(outdir, paste0("glm_fit0_", response_var, "_", species_id, ".rds")))
+  saveRDS(glmm_fit, file.path(outdir, paste0("glmm_fit_", response_var, "_", species_id, ".rds")))
+
+  # Step 1.3: Permutation based pvalue compute
+  pvalue = NA
+  if (n_tau > 0) {
+    simulate_tau = run_tau_test(glm_fit0, GRM_to_test, n_tau, species_id, tau0 = 1, phi0 = 1, seed = 100)
+    
+    # Compute permutation-based p-value
+    pvalue = max(sum(simulate_tau$t > glmm_fit$t) / n_tau, 1 / (n_tau * 10))
+    
+    min_pvalue = 1 / (n_tau * 10)  # Minimum possible p-value
+    pvalue = ifelse(pvalue == 0, min_pvalue, pvalue)
+    
+    simulate_tau$species_id = species_id
+    simulate_tau %>% 
+      select(species_id, everything()) %>%
+      write.table(file.path(outdir, paste0("permutation_tau_", species_id, ".tsv")), sep = "\t", quote = F, row.names = F)
+  }
+  
+  # Step 2: Run beta test for gene-trait assocaition
+  genes_tested = run_beta_test(sample_by_gene_to_test, glm_fit0, glmm_fit, GRM_to_test, genes_to_test, do_spa = do_SPA)
+  
+  saveRDS(genes_tested, file.path(outdir, paste0("genes_tested_", response_var, "_", species_id, ".rds")))
+  
+  # Step 3: Summarize GLMM results
+  summary_df = data.frame(
+    species_id = species_id, 
+    tau = glmm_fit$tau, 
+    iters = glmm_fit$iter_finised, 
+    pvalue = pvalue, 
+    converge = glmm_fit$converged
+  )
+  
+  # Extract GLM coefficients and model statistics
+  glm_summary = data.frame(t(glm_fit0$coefficients)) %>%
+    mutate(
+      formula = paste(deparse(glm_fit0$formula), collapse = " "), 
+      family = glm_fit0$family[[1]], 
+      AIC = glm_fit0$aic
+    )
+  
+  # Combine summary results
+  final_summary = cbind(summary_df, glm_summary)
+  
+  # Save summary to a TSV file
+  write.table(final_summary, file.path(outdir, paste0("microslam_", response_var, "_", species_id, ".tsv")), 
+              sep = "\t", row.names = FALSE, quote = FALSE)
+  
+  invisible(NULL)
+}
+
+
+#' summary.pop.struct.glmm 
+#'
+#' Summarize the output of fit tau test
+#'
+#' @param x a pop.struct.glmm objecct the output of fit_tau_test; GLMM of species with grm accounted for
+#' @param ... Additional arguments passed to other summary methods.
+#' @export summary.pop.struct.glmm
+#' @export 
+summary.pop.struct.glmm <- function(x, ...) {
+  cat("Species ID: ", x$species_id, "\n")
+  cat("Formula: ", x$formula, "\n")
+  cat("family: ", paste(x$trait_type[1:2]), "\n")
+  cat("Fixed-effect covariates estimates: \n", names(x$coefficients), "\n", round(x$coefficients,3), "\n")
+  cat("Converged: ", x$converged, "\n")
+  cat("Number of iterations:",x$iter_finised,"\n")
+  cat("Tau: ", round(x$var_vec[2],3), "\n")
+  cat("Phi: ", round(x$var_vec[1],3), "if logit or binomail should be 1", "\n")
+  cat("T value of tau:", round(x$t,3),"\n")
+  cat("Number of Samples:", length(x$sample_names),"\n")
+}
+
+#' ... all the usual documentation for summary() ...
+#' @param x An object to summarize.
+#' @param ... Additional arguments passed to other summary methods.
+#' @export
+summary <- function(x, ...) {
+  UseMethod("summary")
+}
+
 
 filter_pop_obj <- function(pop.struct.glmm, sample_indexs) {
   pop.struct.glmm$gene_value = sample_indexs$gene_value
@@ -789,76 +863,8 @@ filter_pop_obj <- function(pop.struct.glmm, sample_indexs) {
   return(pop.struct.glmm)
 }
 
-simulate_tau_inner <- function(glm.fit0, grm, species_id = "s_id", tau0, phi0) {
-  family_to_fit = glm.fit0$family
-  data_new = glm.fit0$data
-  formulate_to_fit = glm.fit0$formula
-  data_new_shuffled = data_new[sample(1:nrow(data_new), nrow(data_new)), ]
-  data_new_shuffled$sample_name = rownames(grm)
-  refit0 = glm(formulate_to_fit, data = data_new_shuffled, family = family_to_fit)
-  fit.glmm = tryCatch(fit_tau_test(refit0, grm, tau0 = tau0, phi0 = phi0, verbose = FALSE, species_id = species_id, log_file = NA), error = function(e) e)
-  if (length(fit.glmm$t)>0) {
-    t = sum(fit.glmm$b^2, na.rm = TRUE)/length(fit.glmm$sample_names)
-    tau = fit.glmm$var_vec[2]
-    phi  = fit.glmm$var_vec[1]
-  } else {
-    print("error")
-    tau = 0
-    t = 0
-    phi = 0
-  }
-  return(data.frame("tau" = tau, t,phi))
-}
 
-#' run_tau_test
-#'
-#' take output from population structure test and test how significant the tau is for that set of data
-#'
-#' @param glm.fit0 glm model. Model output with no sample relatedness accounted for
-#' @param grm Genetic Relatedness Matrix (from scripts or user) NxN matrix of sample relatedness
-#' @param n_tau number of tau to simulate
-#' @param species_id species id for bacterial species
-#' @param tau0 starting tau
-#' @param phi0 starting phi
-#' @return df of values of T for tau for different permutations of the covarites matrix
-#' @export
-run_tau_test <- function(glm.fit0, grm, n_tau, species_id = "s_id", tau0, phi0, seed=1) {
-  set.seed(seed)
-  list_of_tau = lapply(seq(1, n_tau), function(x) simulate_tau_inner(glm.fit0, grm, species_id = species_id, tau0, phi0))
-  df_of_tau = do.call(rbind, list_of_tau)
-  return(df_of_tau)
-}
-
-
-
-
-#' summary.pop.struct.glmm 
-#'
-#' Summarize the output of fit tau test
-#'
-#' @param x a pop.struct.glmm objecct the output of fit_tau_test; GLMM of species with grm accounted for
-#' @export summary.pop.struct.glmm
-#' @export 
-summary.pop.struct.glmm <- function(x, ...) {
-  cat("Species ID: ", x$species_id, "\n")
-  cat("Formula: ", x$formula, "\n")
-  cat("family: ", paste(x$trait_type[1:2]), "\n")
-  cat("Fixed-effect covariates estimates: \n", names(x$coefficients), "\n", round(x$coefficients,3), "\n")
-  cat("Converged: ", x$converged, "\n")
-  cat("Number of iterations:",x$iter_finised,"\n")
-  cat("Tau: ", round(x$var_vec[2],3), "\n")
-  cat("Phi: ", round(x$var_vec[1],3), "if logit or binomail should be 1", "\n")
-  cat("T value of tau:", round(x$t,3),"\n")
-  cat("Number of Samples:", length(x$sample_names),"\n")
-}
-
-#' ... all the usual documentation for summary() ...
-#' @export
-summary <- function(x, ...) {
-  UseMethod("summary")
-}
-
-
+######## SADDLE POINTS
 saddle_prob <- function(q, mu, g, var1, cutoff = 2, log.p = FALSE) {
   #### taken from ‘SPAtest’ with a few changes for use case
   m1 = sum(mu * g)
@@ -1038,4 +1044,143 @@ K2 <- function(t, mu, g) {
     out[i] = sum(temp2 / temp1, na.rm = TRUE)
   }
   return(out)
+}
+
+add_logp<-function(p1,p2) {
+  #### From ‘SPAtest' package
+  p1<- -abs(p1)
+  p2<- -abs(p2)
+  maxp<-max(p1,p2)
+  minp<-min(p1,p2)
+  return(maxp+log(1+exp(minp-maxp)))
+}
+
+######## CHECK
+check_gene_matrix <- function(gene_matrix) {
+  ### function to check gene matrix is as expected for creation of GRM"
+  # gene_matrix NxM+1  matrix with column sample_name, N is number of samples, M is number of genes
+ if(!colnames(gene_matrix)[1] == "sample_name"){
+   warning("first column in gene matrix is not sample_name this might cause unexpected behavior")
+ }
+  if(typeof(gene_matrix[,1]) != "character"){
+    warning("first column in gene matrix is expected to be sample_name, if this is not the sample name and is a value of a gene, this will not be included in the computation.")
+  }
+  if(any(duplicated(gene_matrix[,1]))){
+    stop("gene matrix should not have any duplicated sample names, sample names should be unique.")
+  }
+  if(any(is.na(gene_matrix[,1]))){
+    stop("gene matrix should not have any NA sample names, sample names should be unique.")
+  }
+  if(!all(apply(gene_matrix[,-1],2,function(x) all(!is.na(as.numeric(x)))))){
+    stop("all columns besides the first column should be numeric")
+  }
+  if((ncol(gene_matrix)) < 3 | ncol(gene_matrix) < nrow(gene_matrix)){
+    warning("gene matrix does not have as many columns as rows, gene matrix should be a gene X sample matrix, if there are not many genes, the GRM will less precise.")
+  }
+  if(!is.data.frame(gene_matrix)){
+    warning("gene_matrix is not a data frame, could cause unexpected behavior")
+  }
+}
+
+check_inputs_tau <- function(glm.fit0,grm,species_id,tau0,phi0,maxiter,tol,verbose,log_file) {
+  ## check inputs are as expected for tau test
+  # glm.fit0 baseline glm from glm function
+  # grm output from create_grm or NxN matrix
+  # species_id id to denote species
+  # tau0 numeric > 0 
+  # phi0 numeric > 0 
+  # maxiter maximum iterations
+  # tol tolarnce for fitting usually <1
+  # verbose whether to write updates as fitting occurs
+  # write_log whether to write log file
+  # log_file location to write log file
+  if(!is.logical(verbose)){
+    stop("verbose should be a logical")
+  }
+  
+  if(!dir.exists(dirname(log_file))){
+    warning("log file directory don't exist. Create one")
+    dir.create(dirname(log_file), recursive = T, showWarnings = F)
+  }
+
+  if(!is.numeric(tol)){
+    stop("tolarance should be numeric")
+  }
+  if(tol>.01){
+    warning("tolarance is usually smaller than .01")
+  }
+  if(!is.numeric(maxiter)){
+    stop("maxiter should be numeric")
+  }
+  if(maxiter<3){
+    warning("maxiter is usually larger than 3")
+  }
+  if(maxiter>100){
+    warning("large maxiter, might take a long time to converge")
+  }
+  if(!is.numeric(tau0)){
+    stop("tau0 must be numeric")
+  }
+  if(!is.numeric(phi0)){
+    stop("phi0 must be numeric")
+  }
+  if(tau0 <= 0 | phi0 <= 0){
+    stop("tau0 and phi0 must be a postive number")
+  }
+  check_grm(grm, glm.fit0, verbose)
+}
+
+check_beta <- function(pop.struct.glmm, glm.fit0, grm, gene_df, SPA = FALSE) {
+  ## check inputs for beta test for expected input
+  # pop.struct.glmm output from tau test
+  # glm.fit0 baseline glm from glm function
+  # grm output from create_grm or NxN matrix
+  # gene_df dataframe of gene_id, sample_name, and gene_value
+  if(!is.logical(SPA)){
+    stop("SPA should be a logical")
+  }
+  if (!inherits(pop.struct.glmm, "pop.struct.glmm")) {
+    stop("Error: pop.struct.glmm is not a valid object")
+  }
+  if(all(pop.struct.glmm$y != glm.fit0$y)){
+    warning("y for pop.struct.glmm does not match y for glm.fit0, if this is not intentional double check data.")
+  }
+  if(!is.data.frame(gene_df)){
+    stop("gene_df is expected to be a data frame")
+  }
+  
+  if(!any("sample_name" == colnames(gene_df))){
+    stop("Expected column named sample_name, please use a gene_df with a column named sample_name with sample names")
+  }
+}
+
+check_grm <- function(grm, glm.fit0, verbose) {
+  ### function to check grm and glm.fit0 that they are the expected inputs
+  # grm, NxN matrix
+  # glm.fit0, output from glm, baseline glm
+  if(!is.matrix(grm)){
+    stop("grm is expected to be a matrix")
+  }
+  if(!is.numeric(grm) |  any(is.na(grm))){
+    stop("grm is expected to have all numeric values")
+  }
+  if(nrow(grm) != ncol(grm)){
+    stop("grm is expected to be a NxN matrix, with N as the number of samples")
+  }
+  if(!all(colnames(grm) == rownames(grm))){
+    warning("column names do not match row names, grm should be a sample by sample matrix")
+  }
+  if(class(glm.fit0)[1] != "glm"){
+    stop("Expected a glm object for glm.fit0, Example: glm_fit0=glm(`y ~ age  + 1`, data = exp_metadata, family = `binomial`)")
+  }
+  if(nrow(glm.fit0$data) != nrow(grm)){
+    stop("number of samples from baseline glm does not match number of samples from grm, these must match")
+  }
+  if ("sample_name" %in% colnames(glm.fit0$data)) {
+    if (!all(glm.fit0$data$sample_name == rownames(grm))) {
+      stop("\nERROR! the sample names for glm and grm do not match")
+    }
+  } else {
+    warning("not running check on sample names ensure grm sample order and glm fit sample order match! Will only check if data from glm has column named sample_name")
+  }
 }

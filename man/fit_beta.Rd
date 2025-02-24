@@ -4,7 +4,7 @@
 \alias{fit_beta}
 \title{fit_beta}
 \usage{
-fit_beta(pop.struct.glmm, glm.fit0, grm, gene_df, SPA = FALSE)
+fit_beta(pop.struct.glmm, glm.fit0, grm, sample_by_gene_df, SPA = FALSE)
 }
 \arguments{
 \item{pop.struct.glmm}{output of fit_tau_test; GLMM of species with grm accounted for}
@@ -13,7 +13,7 @@ fit_beta(pop.struct.glmm, glm.fit0, grm, gene_df, SPA = FALSE)
 
 \item{grm}{Genetic Relatedness Matrix (from calculate_grm or user) NxN matrix of sample relatedness}
 
-\item{gene_df}{long data frame with, gene_id, sample_name, and gene_value}
+\item{sample_by_gene_df}{sample-by-gene data frame with sample_name, and list_of_genes}
 
 \item{SPA}{whether to run Saddle point approximation for pvalues (will slow down output)}
 }

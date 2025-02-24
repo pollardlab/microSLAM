@@ -12,5 +12,11 @@ generalized linear mixed effects models (GLMMs)
 \author{
 \strong{Maintainer}: Miriam Goldman \email{miriamagoldman@gmail.com}
 
+Authors:
+\itemize{
+  \item Chunyu Zhao
+  \item Katie Pollard [thesis advisor]
+}
+
 }
 \keyword{glmm}

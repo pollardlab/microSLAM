@@ -5,3 +5,6 @@
 inst/doc
 renv.lock
 renv/
+.DS_Store
+example_log/
+example_output/
